@@ -1,3 +1,10 @@
+# Documentation
+
+Some documentation explaining how the project works and how to use it
+is available on
+- [(FR) zarak.fr](https://zarak.fr/linux/sre/vauban/)
+- [(EN) zarak.fr](https://zarak.fr/linux/sre/vauban-en/)
+
 # How to use
 
 ## manual prerequisites
