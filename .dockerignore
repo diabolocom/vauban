@@ -1,0 +1,12 @@
+unsquashfs*
+overlayfs
+*tgz
+*img
+tmp
+rootfs
+*.iso
+*.raw
+fs-*
+iso-*
+*-backup
+ansible

@@ -1,0 +1,37 @@
+ARG SOURCE
+
+FROM ${SOURCE}
+
+ARG SOURCE
+ARG PLAYBOOK
+ARG HOSTNAME
+ARG BRANCH
+ARG HOOK_PRE_ANSIBLE
+ARG HOOK_POST_ANSIBLE
+ARG ANSIBLE_ROOT_DIR
+ARG ANSIBLE_EXTRA_ARGS
+
+RUN cd /root/ansible/$ANSIBLE_ROOT_DIR && \
+    git fetch && [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/$BRANCH)" ] || git reset origin/$BRANCH --hard && \
+    ( ionice -c3 -p $$ || true ) && \
+    ( renice -n 20 $$ || true ) && \
+    echo "\n\
+    - date: $(date --iso-8601=seconds)\n\
+      playbook: ${PLAYBOOK}\n\
+      hostname: ${HOSTNAME}\n\
+      source: ${SOURCE}\n\
+      git-sha1: $(git rev-parse HEAD)\n\
+      git-branch: ${BRANCH}\n" >> /imginfo && \
+    cat /imginfo && \
+    apt list --installed | sed -e 's/stable,stable/stable/g' > /tmp/apt-before && \
+    echo $HOSTNAME > /etc/hostname && \
+    echo "\n[all]\n$HOSTNAME\n" >> inventory && \
+    hook_pre_ansible() { eval "$HOOK_PRE_ANSIBLE" ; } && hook_pre_ansible && \
+    eval ansible-playbook "${PLAYBOOK}" --diff -l "$HOSTNAME" -c local -v $ANSIBLE_EXTRA_ARGS && \
+    hook_post_ansible() { eval "$HOOK_POST_ANSIBLE" ; } && hook_post_ansible && \
+    echo "\n\
+    - playbook: ${PLAYBOOK}\n\
+      hostname: ${HOSTNAME}\n\
+      packages: |" >> /packages && \
+    apt list --installed | sed -e 's/stable,stable/stable/g' > /tmp/apt-after && \
+    diff /tmp/apt-before /tmp/apt-after | grep '^[<>]' | sed 's/</          -/g' | sed 's/>/          +/g' >> /packages

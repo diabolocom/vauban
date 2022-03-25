@@ -1,0 +1,4 @@
+FROM docker:dind
+
+RUN apk del busybox
+RUN apk add --no-cache python3 py3-yaml bash squashfs-tools git ansible openssh-client coreutils binutils findutils jq grep file make

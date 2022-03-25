@@ -1,0 +1,28 @@
+---
+
+# This file defines how masters are built, dependencies and such
+
+configuration:
+  # Don't apply those stages in the conffs. Useful to gain time if no host-specific configuration is done
+  ignore_stage_in_conffs: []
+
+# Top level keys are ISO files on which to build their children
+# A child (a master) is an object that follows this format:
+# <master-name>:
+#   stages: []  # A list of stages to apply to this master
+#   conffs: "node01-fr*"  # An ansible --limit pattern on which to build the conffs
+#   <sub-child>: {}  # A child object. It will inherit its parent
+#   <other-sub-child>: {}  # Another child object
+#
+# Protected names for masters: "name", "stages", "conffs"
+
+"debian-11-generic-amd64.raw":
+  name: debian-11/iso
+  master-11-example:
+    stages:
+      - playbook.yml
+    master-11-example-2:
+      stages:
+        - playbook2.yml
+      branch: example
+      conffs: "backend*"

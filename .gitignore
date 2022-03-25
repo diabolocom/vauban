@@ -1,0 +1,22 @@
+# Produced files
+vmlinuz
+rootfs*
+conffs-*
+initramfs*
+
+# Souce files
+*iso
+*-backup
+ansible-ro
+ssh_keys/*
+*.raw
+.secrets.env
+
+# Working directories
+tmp
+overlayfs
+unsquashfs
+ansible
+fs-*
+iso-*
+.DS_Store
