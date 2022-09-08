@@ -104,6 +104,10 @@ function prepare_fs() {
 
 prepared="false"
 
+function ensure_devtmpfs() {
+    [[ "$(mount | grep /dev | grep devtmpfs)" ]] || mount -t devtmpfs devtmpfs /dev
+}
+
 function mount_iso() {
     if [[ "$prepared" == "true" ]]; then
         return
@@ -121,6 +125,7 @@ function mount_iso() {
     if [[ "$file_mime" == "application/x-iso9660-image" ]]; then
         mount -o loop -t iso9660 "$iso_fullpath" "./iso-$_arg_iso"
     elif [[ "$file_basic" == "DOS/MBR boot sector, extended partition table (last)" ]]; then
+        ensure_devtmpfs
         losetup -D
         local part
         part="$(losetup -f)"
