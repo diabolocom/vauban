@@ -45,5 +45,12 @@ Use `inventory_hostname` instead
 
 Recommended boot options for PXE looks like :
 ```
-console=tty0 console=ttyS0,115200 net.ifnames=0 verbose rd.debug rd.shell rd.writable.fsimg=1 rd.luks=0 rd.lvm=0 rd.md=0 rd.dm=0 rd.neednet=1 rd.live.debug=1 rd.live.image rootflags=rw rootovl systemd.debug_shell
+console=tty0 console=ttyS0,115200 net.ifnames=0 verbose rd.debug rd.shell rd.writable.fsimg=1 rd.luks=0 rd.lvm=0 rd.md=0 rd.dm=0 rd.neednet=1 rd.live.debug=1 rd.live.image rootflags=rw rootovl
 ```
+
+## livenet and basic auth
+
+Dracut generated initramfs supports livenet -- live images -- fetched from the
+network. Images can be downloaded from HTTPS sources, and with basic auth
+by either putting the credentials in the URL itself, or by using the
+`basicauth=` argument on the kernel commandline, behaving like curl's `-u`.
