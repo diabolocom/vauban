@@ -116,10 +116,13 @@ function build_rootfs() {
     cd ..
     chroot "tmp" bin/bash << "EOF"
     cd etc
-    ln -sfr /run/resolvconf/resolv.conf resolv.conf  # We must do that here because docker mount resolv.conf
+    ln -sfr /run/resolvconf/resolv.conf resolv.conf  # We must do that here because docker mounts resolv.conf
     cd ..
+    if [[ -d /toslash ]]; then
+        cp -r /toslash/* / && rm -rf /toslash  # This is also to allow us to write things in /etc/hostname or /etc/hosts
+    fi
     apt-get clean -y
-    rm -rf root/.ssh/id_ed25519 root/ansible boot/initrd* || true
+    rm -rf root/.ssh/id_ed25519 root/ansible boot/initrd* /var/lib/apt/lists/* || true
 EOF
     put_sshd_keys "$image_name"
     echo "Compressing rootfs"
@@ -163,6 +166,10 @@ function build_conffs_given_host() {
     cd ../..
     put_sshd_keys "$host" "overlayfs/overlayfs-$host/merged"
     cd "overlayfs/overlayfs-${host}"
+    cd merged
+    if [[ -d toslash ]]; then cp -r toslash/* . && rm -rf toslash; fi
+    rm -rf var/lib/apt/lists/*
+    cd ..
     tar cvfz "conffs-$host.tgz" \
         -C merged \
         --exclude "var/log" \
