@@ -83,6 +83,8 @@ function bootstrap_fs() {
     apt-get install -y locales;
     localedef -i en_US -f UTF-8 en_US.UTF-8
     apt-get install -y lsb-release;
+    echo "deb http://deb.debian.org/debian $(lsb_release -s -c)-proposed-updates main contrib non-free" >> /etc/apt/sources.list;
+    apt-get update;
     apt-get install -y linux-image-amd64 linux-headers-amd64;
     # remove old kernel/headers version.
     # List all linux headers/image, get only 'local' (meaning the one installed but not downloadable anymore, aka old kernel version)
