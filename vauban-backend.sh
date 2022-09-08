@@ -234,6 +234,15 @@ function chroot_dracut() {
     modules="$2"
     kernel_version="$3"
 
+    cd "fs-$_arg_iso"
+    mkdir -p proc sys dev
+    mount -t proc /proc proc/
+    mount --rbind /sys sys/
+    mount --rbind /dev dev/
+    mount --make-rslave sys/
+    mount --make-rslave dev/
+    cd ..
+
     cp dracut.conf "fs-$_arg_iso/"
     chroot "fs-$_arg_iso" bin/bash << "EOF"
     set -x;
@@ -259,6 +268,9 @@ EOF
     dracut -N --conf dracut.conf -f -k "$modules" initramfs.img $kernel_version 2>&1 > /dev/null;
     rm /fs-$_arg_iso;
 EOF
+    umount -R "fs-$_arg_iso"/proc
+    umount -R "fs-$_arg_iso"/sys
+    umount -R "fs-$_arg_iso"/dev
 }
 
 function build_initramfs() {
