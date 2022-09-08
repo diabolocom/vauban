@@ -230,11 +230,12 @@ function chroot_dracut() {
     cp dracut.conf "fs-$_arg_iso/"
     chroot "fs-$_arg_iso" bin/bash << "EOF"
     set -x;
-    apt-get install -y openssh-server firmware-bnx2x
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y openssh-server firmware-bnx2x
     cd tmp
     version="$(cat /etc/debian_version)"
     if [[ "$version" = "10."* ]]; then
-        apt-get install -y dracut dracut-core dracut-network 2>&1 > /dev/null || true
+        apt-get install -y -o Dpkg::Options::="--force-confold" --force-yes dracut dracut-core dracut-network 2>&1 > /dev/null || true
     else
         apt-get download dracut-core dracut-network dracut-live dracut-squash
         PATH=/usr/local/sbin:/usr/bin/:/sbin dpkg -i dracut*

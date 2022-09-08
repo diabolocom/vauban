@@ -77,6 +77,7 @@ function bootstrap_fs() {
     rm -f /etc/resolv.conf;
     echo nameserver 8.8.8.8 > /etc/resolv.conf;
     echo "" > /etc/fstab;
+    export DEBIAN_FRONTEND=noninteractive
     sed -i 's/main$/main contrib non-free/' /etc/apt/sources.list;
     apt-get remove -y initramfs-tools grub2-common;
     apt-get update;
@@ -85,7 +86,7 @@ function bootstrap_fs() {
     apt-get install -y lsb-release;
     echo "deb http://deb.debian.org/debian $(lsb_release -s -c)-proposed-updates main contrib non-free" >> /etc/apt/sources.list;
     apt-get update;
-    apt-get install -y linux-image-amd64 linux-headers-amd64;
+    apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y linux-image-amd64 linux-headers-amd64;
     # remove old kernel/headers version.
     # List all linux headers/image, get only 'local' (meaning the one installed but not downloadable anymore, aka old kernel version)
     # extract package name and remove
