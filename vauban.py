@@ -307,7 +307,7 @@ STAGES = {
 @click.option(
     "--stage",
     type=click.Choice(
-        ["rootfs", "conffs", "initramfs", "all", "trueall"], case_sensitive=True
+        ["rootfs", "conffs", "initramfs", "kernel", "all", "trueall"], case_sensitive=True
     ),
     default="all",
     show_default=True,
