@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2029,SC2154,SC2034
 
-# shellcheck disable=SC2029
+set -eEuo pipefail
 
 function docker_import() {
     echo "Importing in docker the filesystem from the provided ISO"
@@ -16,13 +17,13 @@ function prepare_stage_for_host() {
     local source="$3"
     local branch="$4"
     local container_id
+    local timeout=120
 
     # Let's make sure we work on the new container
     $real_docker container stop "$host" > /dev/null 2>&1 || true
     $real_docker container rm "$host" > /dev/null 2>&1 || true
 
-    sleep 2
-    for i in $(seq 1 15); do
+    for i in $(seq 1 $timeout); do
         for id in $($real_docker ps -q); do
             if [[ "$($real_docker exec "$id" cat /tmp/stage-ready 2>/dev/null)" == "$host" ]]; then
                 container_id="$id"
@@ -37,10 +38,10 @@ function prepare_stage_for_host() {
             echo "Waited to find our container for too long. Aborting .."
             end 1
         fi
-        sleep 2
+        sleep 0.5
     done
 
-    if [[ ! -n ${CI} ]]; then
+    if [[ -z ${CI:-} ]]; then
         # Try to make the container nice
         container_pid="$(ps aux | grep "$container_id" | grep -v grep | awk '{ print $2 }')"
         renice -n 19 -p "$container_pid" > /dev/null 2>&1 || true
@@ -96,7 +97,7 @@ function apply_stage() {
     for host in $hosts; do
         if [[ "$add_host_to_prefix" == "yes" ]]; then
             local_prefix="$prefix_name/$host"
-            local_source_name="$(echo $source_name | sed -e s,HOSTNAME,"$host", )"
+            local_source_name="${source_name//HOSTNAME/$host}"
         else
             local_prefix="$prefix_name"
             local_source_name="$source_name"
@@ -113,7 +114,7 @@ function apply_stage() {
         pids_docker_build+=("$!")
         hosts_built+=("$host")
         { set -x; trap - ERR;
-            prepare_stage_for_host "$host" "$local_pb" "$local_source_name" "$local_branch" "$last_container_id"
+            prepare_stage_for_host "$host" "$local_pb" "$local_source_name" "$local_branch"
         } > "$vauban_log_path/vauban-prepare-stage-${vauban_start_time}/${host}.log" 2>&1 &
         pids_prepare_stage+=("$!")
     done
@@ -180,7 +181,7 @@ function apply_stages() {
     echo "All stages were applied. Tagging docker images"
     for host in $hosts; do
         if [[ "$add_host_to_prefix" == "yes" ]]; then
-            local_source_name="$(echo $iter_source_name | sed -e s,HOSTNAME,"$host", )"
+            local_source_name="${iter_source_name//HOSTNAME/$host}"
             local_final_name="$final_name/$host"
         else
             local_source_name="$iter_source_name"
@@ -219,7 +220,7 @@ function put_sshd_keys() {
         ssh-keygen -A -f "$host"
     else
         echo "Using SSH keys from the vault"
-        echo $VAULTED_SSHD_KEYS_KEY | gpg -d --no-symkey-cache --pinentry-mode loopback --passphrase-fd 0 "$host.tar.gpg" > "$host.tar"
+        echo "$VAULTED_SSHD_KEYS_KEY" | gpg -d --no-symkey-cache --pinentry-mode loopback --passphrase-fd 0 "$host.tar.gpg" > "$host.tar"
         tar xvf "$host.tar"
     fi
     mkdir -p ../"$dest"/etc/ssh/
@@ -230,7 +231,7 @@ function put_sshd_keys() {
     if [[ ! -f "$host.tar.gpg" ]]; then
         echo "Adding SSH key to the vault"
         tar cvf "$host.tar" "$host"
-        echo $VAULTED_SSHD_KEYS_KEY | gpg -c --no-symkey-cache --pinentry-mode loopback --passphrase-fd 0 "$host.tar" # > "$host.tar.gpg"
+        echo "$VAULTED_SSHD_KEYS_KEY" | gpg -c --no-symkey-cache --pinentry-mode loopback --passphrase-fd 0 "$host.tar" # > "$host.tar.gpg"
     fi
     rm -rf "$host" "$host.tar"
     cd ..
@@ -291,7 +292,7 @@ function build_conffs_given_host() {
     first="yes"
     for stage in "${_arg_stages[@]}"; do
         if [[ "$stage" = *"@"* ]]; then
-            local_pb="$(echo $stage | cut -d'@' -f2)"
+            local_pb="$(echo "$stage" | cut -d'@' -f2)"
         else
             local_pb="$stage"
         fi
@@ -322,7 +323,7 @@ function build_conffs_given_host() {
     # There is a bug in old version of overlayfs where whiteout are not well understood and
     # are kept as buggy char devices on the merged dir. Touching the file and removing
     # it fixes this
-    find -type c -exec bash -c 'stat {} >/dev/null 2>/dev/null || (touch {} && rm {})' \;
+    find . -type c -exec bash -c 'filename="$1"; stat "$filename" >/dev/null 2>/dev/null || (touch "$filename" && rm "$filename")' bash {} \;
     tar cvfz "conffs-$host.tgz" \
         -C merged \
         --exclude "var/log" \
@@ -465,6 +466,7 @@ function upload() {
     echo "Will upload resources to distant TFTP/PXE server"
 
     # Expand upload list
+    # shellcheck disable=SC2086
     add_to_recap upload "Uploaded: "$upload_list
     for host in $UPLOAD_HOSTS_LIST; do
         # Detect if needs to use sudo

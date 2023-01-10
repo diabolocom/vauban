@@ -170,7 +170,7 @@ function get_conffs_hosts() {
     cd ${ANSIBLE_ROOT_DIR:-.}
     hook_pre_ansible() { eval "$HOOK_PRE_ANSIBLE" ; } && hook_pre_ansible
     # Call ansible to resolve for us the --limit
-    hosts="$(ansible -T 1 --list-hosts "$_arg_ansible_host"',!master-*' 2>&1 | grep -v WARNING | tail -n+2 | sed -e 's/ //g' || echo)"
+    hosts="$(ansible -T 1 --list-hosts "$_arg_ansible_host"',!master-*' 2> /dev/null | tail -n+2 | sed -e 's/ //g' || echo)"
     hook_post_ansible() { eval "$HOOK_POST_ANSIBLE" ; } && hook_post_ansible
     if [[ -z $hosts ]]; then
         echo "Couldn't find any matching host in ansible inventory. If the name
@@ -206,7 +206,7 @@ function wait_pids() {
 
 
 function ci_commit_sshd_keys() {
-    if [[ -n ${CI} ]]; then
+    if [[ -n ${CI:-} ]]; then
         git config user.name "$GIT_USERNAME"
         git config user.email "$GIT_EMAIL"
         git remote rm origin2 || true

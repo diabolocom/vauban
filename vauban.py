@@ -352,6 +352,9 @@ def main(name, stage, branch, debug, check, config_path, build_parents):
     Wrapper around vauban.sh for ease of use. Uses a config file to generate
     vauban.sh commands
     """
+    if check:
+        debug = True
+
     config = VaubanConfiguration(config_path)
     master = config.get_master(name)
 
@@ -370,6 +373,9 @@ def main(name, stage, branch, debug, check, config_path, build_parents):
         if os.environ.get("CI", None) is None:
             traceback.print_exception(e)
             return 1
+    except subprocess.CalledProcessError as e:
+        print("Building failed !")
+        return 1
     except Exception as e:
         traceback.print_exception(e)
         print()
