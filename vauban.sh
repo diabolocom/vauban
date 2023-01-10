@@ -55,8 +55,8 @@ function main() {
     local prefix_name
     local source_name
     # Try to be nicer
-    ionice -c3 -p $$ || true
-    renice -n 20 $$ || true
+    ionice -c3 -p $$ > /dev/null 2>&1 || true
+    renice -n 20 $$ > /dev/null 2>&1 || true
 
     check_args
     if [[ "$_arg_rootfs" = "yes" ]]; then

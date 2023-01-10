@@ -6,6 +6,7 @@
 Manage vauban with simple arguments
 """
 
+from __future__ import annotations
 import sys
 import os
 import subprocess
@@ -133,7 +134,7 @@ class VaubanMaster:
             r += c.list_masters()
         return r
 
-    def _build_stage(self, stage, branch, debug):
+    def _build_stage(self, stage, branch, debug, check):
         """
         Internal build function. Actually performs the build if not in debug
         mode
@@ -169,11 +170,15 @@ class VaubanMaster:
 
         if debug:
             print(" ".join(['"' + x + '"' for x in vauban_cli]))
+        if check:
             return
-        process = subprocess.run(vauban_cli, check=True)
+        my_env = os.environ.copy()
+        if debug:
+            my_env['VAUBAN_SET_FLAGS'] = my_env.get('VAUBAN_SET_FLAGS', '') + "x"
+        process = subprocess.run(vauban_cli, check=True, env=my_env)
         assert process.returncode == 0
 
-    def build(self, stage, branch, debug, build_parents):
+    def build(self, stage, branch, debug, check, build_parents):
         """
         Build this master with the given parameters. "Recursive" function,
         it handles the cases where stage=[all, trueall] and build_parents
@@ -182,20 +187,20 @@ class VaubanMaster:
         if build_parents != 0:
             if stage in ["rootfs", "all", "trueall"]:
                 if self.parent is not None:
-                    self.parent.build("rootfs", branch, debug, build_parents - 1)
+                    self.parent.build("rootfs", branch, debug, check, build_parents - 1)
             else:
-                self.build("rootfs", branch, debug, build_parents - 1)
+                self.build("rootfs", branch, debug, check, build_parents - 1)
         if stage in ["all", "trueall"]:
-            self._build_stage("rootfs", branch, debug)
+            self._build_stage("rootfs", branch, debug, check)
             try:
-                self._build_stage("conffs", branch, debug)
+                self._build_stage("conffs", branch, debug, check)
             except NothingToDoException:
                 pass
-            self._build_stage("initramfs", branch, debug)
+            self._build_stage("initramfs", branch, debug, check)
             if stage == "trueall":
-                self._build_stage("kernel", branch, debug)
+                self._build_stage("kernel", branch, debug, check)
         else:
-            self._build_stage(stage, branch, debug)
+            self._build_stage(stage, branch, debug, check)
 
 
 def rootfs(config, vauban_cli, master, only=True):  # pylint: disable=unused-argument
@@ -318,6 +323,9 @@ STAGES = {
     "--debug", is_flag=True, default=False, show_default=True, help="Debug mode"
 )
 @click.option(
+    "--check", is_flag=True, default=False, show_default=True, help="Check mode"
+)
+@click.option(
     "--config-path",
     type=click.Path(exists=True, dir_okay=False),
     default="config.yml",
@@ -331,7 +339,7 @@ STAGES = {
     show_default=True,
     help="How many parent objects to build",
 )
-def main(name, stage, branch, debug, config_path, build_parents):
+def main(name, stage, branch, debug, check, config_path, build_parents):
     """
     Main function entrypoint
     """
@@ -348,7 +356,7 @@ def main(name, stage, branch, debug, config_path, build_parents):
         print(repr(master))
 
     try:
-        master.build(stage, branch, debug, build_parents)
+        master.build(stage, branch, debug, check, build_parents)
     except NothingToDoException as e:
         if os.environ.get("CI", None) is None:
             traceback.print_exception(e)

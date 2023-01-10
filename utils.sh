@@ -159,7 +159,7 @@ function clone_ansible_repo() {
     cd ansible
     git config --global --add safe.directory "$(pwd)"
     git fetch
-    cd -
+    cd - > /dev/null
 }
 
 function get_conffs_hosts() {
@@ -176,7 +176,7 @@ function get_conffs_hosts() {
         echo "Couldn't find any matching host in ansible inventory. If the name
 provided is correct, maybe there's an error in function get_conffs_hosts"
     fi
-    cd - && cd ..
+    cd - > /dev/null && cd ..
     add_to_recap conffs_hosts "Building for:$NEWLINE$hosts"
 }
 
@@ -269,13 +269,23 @@ function docker() {
         img_name="$3"
     fi
     if [[ -n "$img_name" ]]; then
+        echo "Tagging docker image with $REGISTRY/$img_name and pushing it"
         $real_docker tag "$img_name" "$REGISTRY/$img_name:$current_date"
         $real_docker tag "$img_name" "$REGISTRY/$img_name:latest"
         $real_docker push "$REGISTRY/$img_name:$current_date"
         $real_docker push "$REGISTRY/$img_name:latest"
+        echo "Pushed"
 
     fi
     return "$ret"
+}
+
+function ssh() {
+    env ssh -o StrictHostKeyChecking=accept-new $@
+}
+
+function scp() {
+    env scp -o StrictHostKeyChecking=accept-new $@
 }
 
 function pull_image() {

@@ -57,4 +57,4 @@ fi
 
 # Flag to give to `set`. Put a `x` to have `set -x` and enable bash debug/verbose
 # mode. This flag may be disabled in specific sections
-VAUBAN_SET_FLAGS=""
+VAUBAN_SET_FLAGS="${VAUBAN_SET_FLAGS:-}"

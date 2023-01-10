@@ -90,7 +90,7 @@ function apply_stage() {
     clone_ansible_repo
     cd ansible/${ANSIBLE_ROOT_DIR:-.}
     [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/$local_branch)" ]] || git reset "origin/$local_branch" --hard
-    cd -
+    cd - > /dev/null
 
     echo "Applying stage $stage to $source_name (playbook $local_pb from branch $local_branch) on $hosts"
     for host in $hosts; do
@@ -139,7 +139,7 @@ function apply_stage() {
     wait_pids "pids_docker_build" "hosts_built" "build stage $stage"
     wait
     echo "All build-containers exited"
-    cd -
+    cd - > /dev/null
 }
 
 function apply_stages() {
