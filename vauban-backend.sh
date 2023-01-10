@@ -216,12 +216,12 @@ function build_conffs() {
     wait_pids "pids" "hosts_built"
     wait
     add_content_to_recap ""  # newline
-    if [[ -n ${CI+x} ]]; then
+    if [[ -n "${CI}" ]]; then
         add_to_recap "build_conffs: logs" "$(
             for f in $(find /tmp/vauban-logs/ -type f); do
                 echo $f
                 echo
-                tail -n 6 "$f" || true
+                tail -n 50 "$f" || true
                 echo
             done)"
     else

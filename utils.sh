@@ -195,7 +195,7 @@ function wait_pids() {
 
 
 function ci_commit_sshd_keys() {
-    if [[ -n ${CI+x} ]]; then
+    if [[ -n ${CI} ]]; then
         git config user.name "$GIT_USERNAME"
         git config user.email "$GIT_EMAIL"
         git remote rm origin2 || true
@@ -206,7 +206,7 @@ function ci_commit_sshd_keys() {
 
 
 function bootstrap_upload_in_ci() {
-    if [[ -n ${CI+x} ]]; then
+    if [[ -n ${CI} ]]; then
         mkdir -p ~/.ssh
         cat >> ~/.ssh/config << EOF
 Host *
