@@ -218,6 +218,10 @@ class VaubanMaster:
             branch,
         ]
 
+        if cc.conffs is not None:
+            # Override conffs from config.yml
+            self.conffs = cc.conffs
+
         # Auto expand vauban CLI based on the current stage
         vauban_cli = STAGES[cc.stage](self.configuration.config, vauban_cli, self)
 
