@@ -10,3 +10,4 @@ fs-*
 iso-*
 *-backup
 ansible
+linux-build

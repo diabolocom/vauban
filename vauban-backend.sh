@@ -283,7 +283,7 @@ function build_initramfs() {
     kernel="$(find_kernel)"
     kernel_version="$(get_kernel_version "$kernel")"
 
-    cp "$kernel" ./vmlinuz
+    cp "$kernel" ./vmlinuz-default
 
     modules="fs-$_arg_iso/usr/lib/modules/$kernel_version"
     if [ ! -d "$modules" ]; then
@@ -305,7 +305,10 @@ function upload() {
     upload_list="${3:-}"
     if [[ -z "$upload_list" ]]; then
         if [[ $_arg_initramfs = "yes" ]]; then
-            upload_list="initramfs.img vmlinuz"
+            upload_list="initramfs.img vmlinuz-default"
+        fi;
+        if [[ $_arg_kernel = "yes" ]]; then
+            upload_list="vmlinuz"
         fi;
         if [[ $_arg_rootfs = "yes" ]]; then
             upload_list="$upload_list rootfs.tgz"
@@ -316,10 +319,10 @@ function upload() {
 
         # if still empty, send everything
         if [[ -z "$upload_list" ]]; then
-            upload_list="initramfs.img vmlinuz rootfs.tgz overlayfs-*/conffs-*.tgz"
+            upload_list="initramfs.img vmlinuz rootfs.tgz overlayfs-*/conffs-*.tgz vmlinuz-default"
         fi;
     fi;
-    # Exand upload list
+    # Expand upload list
     add_to_recap upload "Uploaded: "$upload_list
     for host in $UPLOAD_HOSTS_LIST; do
         # Detect if needs to use sudo
@@ -331,12 +334,13 @@ function upload() {
 
 
         for file in $upload_list; do
+            if [[ ! -f "$file" ]]; then add_content_to_recap "Skipping file $file: not found" continue; fi
             scp "$file" "$host:/tmp"
             remote_file="$(basename "$file")"
 
-            if [[ "$file" == "vmlinuz" ]] || [[ "$file" == "initramfs.img" ]]; then
+            if [[ "$file" == "vmlinuz" ]] || [[ "$file" == "initramfs.img" ]] || [[ "$file" == "vmlinuz-default" ]]; then
                 if [[ -z "$kernel_version" ]]; then
-                    echo kernel_version not defined and to be used. Aborting
+                    echo kernel_version not defined and to be used for "$file". Aborting
                     exit 1
                 fi
                 remote_file="$file-$kernel_version"
@@ -345,8 +349,10 @@ function upload() {
             else
                 if [[ "$file" == "rootfs.tgz" ]] && [[ -n "$kernel_version" ]]; then
                     ssh "$host" $opt_sudo rm "$UPLOAD_DIR/$master_name/vmlinuz" || true
+                    ssh "$host" $opt_sudo rm "$UPLOAD_DIR/$master_name/vmlinuz-default" || true
                     ssh "$host" $opt_sudo rm "$UPLOAD_DIR/$master_name/initramfs.img" || true
                     ssh "$host" $opt_sudo ln -s "../linux/vmlinuz-$kernel_version" "$UPLOAD_DIR/$master_name/vmlinuz"
+                    ssh "$host" $opt_sudo ln -s "../linux/vmlinuz-default-$kernel_version" "$UPLOAD_DIR/$master_name/vmlinuz-default"
                     ssh "$host" $opt_sudo ln -s "../linux/initramfs.img-$kernel_version" "$UPLOAD_DIR/$master_name/initramfs.img"
                 fi
                 ssh "$host" $opt_sudo mv "/tmp/$remote_file" "$UPLOAD_DIR/$master_name/"
@@ -372,7 +378,6 @@ function build_kernel() {
     mkdir -p linux-build/merged/patches
     cp patches/* linux-build/merged/patches/
 
-    while true; do sleep 1000; done
     chroot "linux-build/merged" bin/bash || true  << EOF
     apt-get install -y build-essential fakeroot devscripts ccache
     apt-get build-dep -y linux
@@ -395,6 +400,6 @@ function build_kernel() {
     tar xvf data.tar.xz > /dev/null
     cp ./boot/vmlinuz-* /vmlinuz
 EOF
-    while true; do sleep 1000; done
+    cp linux-build/merged/vmlinuz ./vmlinuz
     umount linux-build/merged
 }

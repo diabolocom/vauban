@@ -54,6 +54,7 @@ def rootfs(config, vauban_cli, obj, only=True):
         vauban_cli += [
             '--conffs', 'no',
             '--initramfs', 'no',
+            '--kernel', 'no',
         ]
     if not obj['is_iso']:
         vauban_cli += ['--source-image', obj['parent']['name']] + \
@@ -87,6 +88,7 @@ def conffs(config, vauban_cli, obj, only=True):
         vauban_cli += [
             '--rootfs', 'no',
             '--initramfs', 'no',
+            '--kernel', 'no',
         ]
     return vauban_cli
 
@@ -98,13 +100,27 @@ def initramfs(config, vauban_cli, obj, only=True):
     if only:
         vauban_cli += [ '--rootfs', 'no' ]
         vauban_cli += [ '--conffs', 'no' ]
+        vauban_cli += [ '--kernel', 'no' ]
+    return vauban_cli
+
+def kernel(config, vauban_cli, obj, only=True):
+    """
+        Set options for the kernel build stage
+    """
+    vauban_cli += [ '--kernel', 'yes' ]
+    if only:
+        vauban_cli += [ '--rootfs', 'no' ]
+        vauban_cli += [ '--conffs', 'no' ]
+        vauban_cli += [ '--initramfs', 'no' ]
     return vauban_cli
 
 STAGES = {
         "rootfs": rootfs,
         "conffs": conffs,
         "initramfs": initramfs,
+        "kernel": kernel,
         "all": False,
+        "trueall": False,
     }
 
 def build(config, obj, stage, branch, debug, target_name):
@@ -134,18 +150,20 @@ def recursive_build(config, obj, stage, branch, debug, target_name, parents_to_b
         branch = obj.get("branch", "master")
 
     if parents_to_build != 0:
-        if stage in ["rootfs", "all"]:
+        if stage in ["rootfs", "all", "trueall"]:
             if obj.get('parent', None) is not None:
                 recursive_build(config, obj['parent'], stage, branch, debug, target_name, parents_to_build - 1)
-        elif stage in ["conffs", "initramfs"]:
+        elif stage in ["conffs", "initramfs", "kernel"]:
             recursive_build(config, obj, 'rootfs', branch, debug, target_name, parents_to_build - 1)
-    if stage == "all":
+    if stage in ["all", "trueall"]:
         build(config, obj, "rootfs", branch, debug, target_name)
         try:
             build(config, obj, "conffs", branch, debug, target_name)
         except NothingToDoException:
             pass
         build(config, obj, "initramfs", branch, debug, target_name)
+        if stage == "trueall":
+            build(config, obj, "kernel", branch, debug, target_name)
     else:
         build(config, obj, stage, branch, debug, target_name)
 
@@ -185,12 +203,12 @@ def main():
         return 1
 
     if not debug:
-        if stage in ["rootfs", "all"]:
+        if stage in ["rootfs", "all", "trueall"]:
             print(f'Building successful ! {name} was built. Details:')
             subprocess.run(f'docker run --rm {name} cat /imginfo'.split(' '), check=False)
-        if stage in ["conffs", "all"]:
+        if stage in ["conffs", "all", "trueall"]:
             print(f'Building successful ! conffs for {name} was/were built.')
-        if stage in ["initramfs", "all"]:
+        if stage in ["initramfs", "all", "trueall", "kernel"]:
             print(f'Building successful !')
     return 0
 

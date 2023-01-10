@@ -41,6 +41,10 @@ function check_args() {
         echo "Building the initramfs requires an iso (--iso) to get the kernel and kernel modules from"
         exit 1
     fi
+    if [[ "$_arg_kernel" = "yes" ]] && [[ -z "$_arg_iso" ]]; then
+        echo "Building the kernel requires an iso (--iso) to get the kernel version and sources from"
+        exit 1
+    fi
     iso_fullpath="$_arg_iso"
     _arg_iso="$(basename "$_arg_iso")"
 }
@@ -81,14 +85,14 @@ function main() {
     if [[ "$_arg_initramfs" = "yes" ]]; then
         [[ -z "$name" ]] && name="$_arg_name"
         build_initramfs "$name"
-        kernel="$(find_kernel)"
+        kernel="./vmlinuz-default"
         kernel_version="$(get_kernel_version "$kernel")"
     fi
     if [[ "$_arg_kernel" = "yes" ]]; then
         [[ -z "$name" ]] && name="$_arg_name"
         build_kernel "$name"
-        #kernel="$(find_kernel)"
-        #kernel_version="$(get_kernel_version "$kernel")"
+        kernel="./vmlinuz"
+        kernel_version="$(get_kernel_version "$kernel")"
     fi
     if [[ $_arg_upload = "yes" ]]; then
         upload "$_arg_name" "$kernel_version"
