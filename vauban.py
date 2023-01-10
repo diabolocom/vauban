@@ -174,7 +174,7 @@ class VaubanMaster:
             return
         my_env = os.environ.copy()
         if debug:
-            my_env['VAUBAN_SET_FLAGS'] = my_env.get('VAUBAN_SET_FLAGS', '') + "x"
+            my_env["VAUBAN_SET_FLAGS"] = my_env.get("VAUBAN_SET_FLAGS", "") + "x"
         process = subprocess.run(vauban_cli, check=True, env=my_env)
         assert process.returncode == 0
 
@@ -320,10 +320,18 @@ STAGES = {
     help="Specify a specific branch to override default configuration",
 )
 @click.option(
-    "--debug", is_flag=True, default=False, show_default=True, help="Debug mode"
+    "--debug",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Debug mode: more verbose, print vauban.sh commands",
 )
 @click.option(
-    "--check", is_flag=True, default=False, show_default=True, help="Check mode"
+    "--check",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Check mode, don't actually run vauban",
 )
 @click.option(
     "--config-path",
@@ -341,7 +349,8 @@ STAGES = {
 )
 def main(name, stage, branch, debug, check, config_path, build_parents):
     """
-    Main function entrypoint
+    Wrapper around vauban.sh for ease of use. Uses a config file to generate
+    vauban.sh commands
     """
     config = VaubanConfiguration(config_path)
     master = config.get_master(name)
