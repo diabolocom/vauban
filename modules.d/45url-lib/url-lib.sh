@@ -71,7 +71,7 @@ curl_fetch_url() {
     if [ -n "$outloc" ]; then
         # shellcheck disable=SC2086
         echo "executing $curl_args --output $outloc -- $url" > /dev/kmsg
-        curl $curl_args --output "$outloc" -- "$url" > /dev/kmsg 2> /dev/kmsg || return $?
+        curl $curl_args --output "$outloc" -- "$url" || return $?
     else
         local outdir
         outdir="$(mkuniqdir /tmp curl_fetch_url)"
@@ -79,7 +79,7 @@ curl_fetch_url() {
             cd "$outdir" || exit
             # shellcheck disable=SC2086
             echo "executing $curl_args --remote-name $url" > /dev/kmsg
-            curl $curl_args --remote-name "$url" > /dev/kmsg 2> /dev/kmsg || return $?
+            curl $curl_args --remote-name "$url" || return $?
         )
         outloc="$outdir/$(ls -A "$outdir")"
     fi

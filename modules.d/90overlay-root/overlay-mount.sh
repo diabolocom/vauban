@@ -26,7 +26,7 @@ umount $NEWROOT
 mkdir /cow
 mount -n -t tmpfs -o mode=0755 tmpfs /cow
 mkdir /cow/work /cow/rw /cow/config-work /cow/config-rw /cow/lower
-echo "VAUBAN/ Mounting rootfs kin overlayfs for conffs" > /dev/kmsg
+echo "VAUBAN/ Mounting rootfs kin overlayfs for conffs" >> /dev/kmsg
 mount -t overlay -o noatime,lowerdir=/live/image,upperdir=/cow/config-rw,workdir=/cow/config-work,default_permissions overlay /cow/lower
 
 if [ -d /updates -o /run/initramfs/live/updates ]; then

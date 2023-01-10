@@ -2,6 +2,7 @@
 
 if [ -h /dev/root ] && [ -d /run/initramfs/live/updates -o -d /updates ]; then
     info "Applying updates to live image..."
+    echo "VAUBAN 90dmsquash-live: applying updates" >> /dev/kmsg
     mount -o bind /run $NEWROOT/run
     # avoid overwriting symlinks (e.g. /lib -> /usr/lib) with directories
     for d in /updates /run/initramfs/live/updates; do
