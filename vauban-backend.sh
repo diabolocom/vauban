@@ -43,14 +43,14 @@ function prepare_stage_for_host() {
     renice -n 19 -p "$container_pid" > /dev/null 2>&1 || true
     ionice -c 3 -p "$container_pid" > /dev/null 2>&1 || true
 
-    imginfo_update="$(echo "\n\
+    imginfo_update="$(echo -e "\n\
     - date: $(date --iso-8601=seconds)\n\
       playbook: ${playbook}\n\
       hostname: ${host}\n\
       source: ${source}\n\
       git-sha1: $(git rev-parse HEAD)\n\
-      git-branch: ${branch}\n")"
-    $real_docker exec "$id" echo "$imginfo_update" >> /imginfo
+      git-branch: ${branch}\n" | base64 -w0)"
+    $real_docker exec "$id" bash -c "echo -e $imginfo_update | base64 -d >> /imginfo"
     echo -e "\n[all]\n$host\n" >> ansible/${ANSIBLE_ROOT_DIR:-.}/inventory
 
     $real_docker exec "$id" touch /tmp/stage-begin
