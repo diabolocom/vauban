@@ -378,7 +378,7 @@ function build_kernel() {
     mkdir -p linux-build/merged/patches
     cp patches/* linux-build/merged/patches/
 
-    chroot "linux-build/merged" bin/bash || true  << EOF
+    chroot "linux-build/merged" bin/bash << "EOF"
     apt-get install -y build-essential fakeroot devscripts ccache
     apt-get build-dep -y linux
     cd /root
