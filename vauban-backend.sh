@@ -122,7 +122,7 @@ function build_rootfs() {
         cp -r /toslash/* / && rm -rf /toslash  # This is also to allow us to write things in /etc/hostname or /etc/hosts
     fi
     apt-get clean -y
-    rm -rf root/.ssh/id_ed25519 root/ansible boot/initrd* /var/lib/apt/lists/* || true
+    rm -rf root/.ssh/vauban__id_ed25519 root/ansible boot/initrd* /var/lib/apt/lists/* || true
 EOF
     put_sshd_keys "$image_name"
     echo "Compressing rootfs"

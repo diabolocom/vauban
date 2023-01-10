@@ -82,9 +82,9 @@ ARG CACHE  # used to force re-clone
 ARG ISO
 ARG BRANCH
 
-RUN echo "$SSH_KEY" > /root/.ssh/id_ed25519 && \
-    chmod 0600 /root/.ssh/id_ed25519 && \
-    GIT_SSH_COMMAND="ssh -i /root/.ssh/id_ed25519 -o 'StrictHostKeyChecking no'" git clone git@git.dabcnet.net:ops/ansible.git && \
+RUN echo "$SSH_KEY" > /root/.ssh/vauban__id_ed25519 && \
+    chmod 0600 /root/.ssh/vauban__id_ed25519 && \
+    GIT_SSH_COMMAND="ssh -i /root/.ssh/vauban__id_ed25519 -o 'StrictHostKeyChecking no'" git clone git@git.dabcnet.net:ops/ansible.git && \
     cd ansible && git checkout "$BRANCH" && \
     git log -n 1 && \
     echo "---\n\

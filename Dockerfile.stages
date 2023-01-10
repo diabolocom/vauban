@@ -11,8 +11,11 @@ ARG HOOK_POST_ANSIBLE
 ARG ANSIBLE_ROOT_DIR
 ARG ANSIBLE_EXTRA_ARGS
 
+
 RUN cd /root/ansible/$ANSIBLE_ROOT_DIR && \
-    git fetch && [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/$BRANCH)" ] || git reset origin/$BRANCH --hard && \
+    export GIT_SSH_COMMAND="ssh -i /root/.ssh/vauban__id_ed25519 -o 'StrictHostKeyChecking no'" && \
+    git fetch && \
+    [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/$BRANCH)" ] || git reset origin/$BRANCH --hard && \
     ( ionice -c3 -p $$ || true ) && \
     ( renice -n 20 $$ || true ) && \
     echo "\n\
@@ -27,6 +30,7 @@ RUN cd /root/ansible/$ANSIBLE_ROOT_DIR && \
     echo $HOSTNAME > /etc/hostname && \
     echo "\n[all]\n$HOSTNAME\n" >> inventory && \
     hook_pre_ansible() { eval "$HOOK_PRE_ANSIBLE" ; } && hook_pre_ansible && \
+    unset GIT_SSH_COMMAND && \
     eval ansible-playbook "${PLAYBOOK}" --diff -l "$HOSTNAME" -c local -v $ANSIBLE_EXTRA_ARGS && \
     hook_post_ansible() { eval "$HOOK_POST_ANSIBLE" ; } && hook_post_ansible && \
     echo "\n\
