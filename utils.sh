@@ -154,9 +154,6 @@ function clone_ansible_repo() {
     export GIT_SSH_COMMAND="ssh -i $(pwd)/$_arg_ssh_priv_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
     if [[ ! -d ansible ]]; then
         git clone "$ANSIBLE_REPO" ansible
-        cd ansible && git checkout "$_arg_branch"
-    else
-        cd ansible && git fetch && git reset "origin/$_arg_branch" --hard
     fi
     cd ansible
     git config --global --add safe.directory "$(pwd)"

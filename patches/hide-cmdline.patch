@@ -6,6 +6,7 @@ index fa762c5fbcb2..a0646db5f8dc 100644
  #include <linux/proc_fs.h>
  #include <linux/seq_file.h>
  
++// This is an example patch that you can apply to build a custom debian kernel
 +static int cmdline_proc_counter = 0;
 +
  static int cmdline_proc_show(struct seq_file *m, void *v)

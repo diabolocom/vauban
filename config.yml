@@ -5,6 +5,9 @@
 configuration:
   # Don't apply those stages in the conffs. Useful to gain time if no host-specific configuration is done
   ignore_stage_in_conffs: []
+  # Never upload these masters
+  never_upload:
+    - master-11-example
 
 # Top level keys are ISO files on which to build their children
 # A child (a master) is an object that follows this format:
