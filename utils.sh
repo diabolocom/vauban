@@ -148,9 +148,7 @@ function mount_iso() {
     prepared="true"
 }
 
-function get_conffs_hosts() {
-    # Use this function to determine a list of hosts matching the --ansible-hosts vauban CLI argument
-    # It uses ansible to resolve the ansible-specific syntax
+function clone_ansible_repo() {
     export GIT_SSH_COMMAND="ssh -i $(pwd)/$_arg_ssh_priv_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
     if [[ ! -d ansible ]]; then
         git clone "$ANSIBLE_REPO" ansible
@@ -158,6 +156,17 @@ function get_conffs_hosts() {
     else
         cd ansible && git fetch && git reset "origin/$_arg_branch" --hard
     fi
+    cd ansible
+    git config --global --add safe.directory "$(pwd)"
+    git fetch
+    cd -
+}
+
+function get_conffs_hosts() {
+    # Use this function to determine a list of hosts matching the --ansible-hosts vauban CLI argument
+    # It uses ansible to resolve the ansible-specific syntax
+    clone_ansible_repo
+    cd ansible && git reset "origin/$_arg_branch" --hard
     cd ${ANSIBLE_ROOT_DIR:-.}
     hook_pre_ansible() { eval "$HOOK_PRE_ANSIBLE" ; } && hook_pre_ansible
     # Call ansible to resolve for us the --limit

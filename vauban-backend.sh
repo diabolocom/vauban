@@ -83,9 +83,8 @@ function apply_stage() {
         local_pb="$stage"
     fi
 
-    export GIT_SSH_COMMAND="ssh -i $(pwd)/$_arg_ssh_priv_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+    clone_ansible_repo
     cd ansible/${ANSIBLE_ROOT_DIR:-.}
-    git fetch
     [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/$local_branch)" ]] || git reset "origin/$local_branch" --hard
     cd -
 
