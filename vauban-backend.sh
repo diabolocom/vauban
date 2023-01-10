@@ -38,10 +38,12 @@ function prepare_stage_for_host() {
         sleep 2
     done
 
-    # Try to make the container nice
-    container_pid="$(ps aux | grep "$container_id" | grep -v grep | awk '{ print $2 }')"
-    renice -n 19 -p "$container_pid" > /dev/null 2>&1 || true
-    ionice -c 3 -p "$container_pid" > /dev/null 2>&1 || true
+    if [[ ! -n ${CI} ]]; then
+        # Try to make the container nice
+        container_pid="$(ps aux | grep "$container_id" | grep -v grep | awk '{ print $2 }')"
+        renice -n 19 -p "$container_pid" > /dev/null 2>&1 || true
+        ionice -c 3 -p "$container_pid" > /dev/null 2>&1 || true
+    fi
 
     imginfo_update="$(echo -e "\n\
     - date: $(date --iso-8601=seconds)\n\
