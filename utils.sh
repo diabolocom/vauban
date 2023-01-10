@@ -37,6 +37,7 @@ function catch_err() {
 function end() {
     local return_code="${1:-}"
     set +eE
+    [[ -z "$(jobs -p)" ]] || kill $(jobs -p)
     cleanup
     print_recap
     exit $return_code
@@ -173,6 +174,7 @@ provided is correct, maybe there's an error in function get_conffs_hosts"
 function wait_pids() {
     local -n local_pids="$1"
     local -n local_hosts_built="$2"
+    local job_name="$3"
     local must_exit
     local return_code
     must_exit="no"
@@ -182,13 +184,13 @@ function wait_pids() {
         wait "${local_pids[i]}" || let "return_code=1"
         if [[ "$return_code" != 0 ]]; then
             must_exit="yes"  # one fail - everyone fail. No one's left behind !
-            add_content_to_recap "${NEWLINE}[KO] ${local_hosts_built[i]}:${TAB}failed !${NEWLINE}"
+            add_content_to_recap "[KO] [$job_name] ${local_hosts_built[i]}:${TAB}failed !"
         else
-            add_content_to_recap "${NEWLINE}[OK] ${local_hosts_built[i]}:${TAB}success${NEWLINE}"
+            add_content_to_recap "[OK] [$job_name] ${local_hosts_built[i]}:${TAB}success"
         fi
     done
     if [[ "$must_exit" = "yes" ]]; then
-        add_to_recap "build_conffs: logs" "Conffs not fully built. Check the build details in /tmp/vauban-logs/*-$build_time"
+        add_to_recap "$job_name: details" "Job failed !. Check the build details in $recap_file or in /tmp/vauban/*$vauban_start_time/*.log"
         end 1
     fi
 }
@@ -284,33 +286,48 @@ function set_deployed() {
     docker push "$image:deployed"
 }
 
+vauban_log_path=/tmp/vauban
+vauban_start_time="$(date --iso-8601=seconds)"
+recap_file="/tmp/vauban/vauban-recap-$vauban_start_time"
+
+function init_log() {
+    mkdir -p "$vauban_log_path"
+    mkdir -p $vauban_log_path/vauban-docker-build-${vauban_start_time}
+    mkdir -p $vauban_log_path/vauban-prepare-stage-${vauban_start_time}
+}
+init_log
+
 function add_to_recap() {
+    set "+$VAUBAN_SET_FLAGS"
     local section="$1"
     shift
     local content="$@"
-    RECAP="${RECAP:-}"
 
-    RECAP="$(printf "%s\n\n============================\n%s\n============================\n\n%s\n\n" "$RECAP" "$section" "$content")"
+
+    printf "\n\n============================\n%s\n============================\n\n%s\n\n" "$section" "$content" >> "$recap_file"
+    set "-$VAUBAN_SET_FLAGS"
 }
 
 function add_content_to_recap() {
+    set "+$VAUBAN_SET_FLAGS"
     local content="$@"
-    RECAP="${RECAP:-}"
 
-    RECAP="$(printf "%s%s\n" "$RECAP" "$content")"
+    printf "%s\n" "$content" >> "$recap_file"
+    set "-$VAUBAN_SET_FLAGS"
 }
 
 function add_section_to_recap() {
+    set "+$VAUBAN_SET_FLAGS"
     local section="$@"
-    RECAP="${RECAP:-}"
 
-    RECAP="$(printf "%s\n\n============================\n%s\n============================\n\n" "$RECAP" "$section")"
+    printf "\n\n============================\n%s\n============================\n\n" "$section" >> "$recap_file"
+    set "-$VAUBAN_SET_FLAGS"
 }
 
 function print_recap() {
     set "+$VAUBAN_SET_FLAGS"
 
-    echo -e "$RECAP"
+    cat "$recap_file"
 
     set "-$VAUBAN_SET_FLAGS"
 }

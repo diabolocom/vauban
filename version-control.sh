@@ -14,7 +14,7 @@ function main() {
     fi
     full_name="$_arg_image:$_arg_tag"
     docker pull "$full_name"
-    build_rootfs "$full_name"
+    export_rootfs "$full_name"
     upload "$_arg_master" "" "rootfs.tgz"
 
     # Changing deployed tag

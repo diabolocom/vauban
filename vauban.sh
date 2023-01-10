@@ -69,8 +69,7 @@ function main() {
             import_iso "$prefix_name"
             source_name="${prefix_name}/iso"
         fi
-        apply_stages "$source_name" "$prefix_name" "$_arg_name" "$_arg_name" "${_arg_stages[@]}"
-        build_rootfs "$_arg_name"
+        build_rootfs "$source_name" "$prefix_name" "$_arg_name" "$_arg_name" "${_arg_stages[@]}"
         kernel_version="$(get_rootfs_kernel_version "$_arg_name")"
         _arg_source_image="$source_name"  # conffs will be built on top of what we just built
     fi
@@ -89,6 +88,7 @@ function main() {
         kernel_version="$(get_kernel_version "$kernel")"
     fi
     if [[ "$_arg_kernel" = "yes" ]]; then
+        end 0  # FIXME
         [[ -z "$name" ]] && name="$_arg_name"
         build_kernel "$name"
         kernel="./vmlinuz"

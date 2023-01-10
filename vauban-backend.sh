@@ -10,6 +10,134 @@ function docker_import() {
     tar -C "fs-$_arg_iso" -c . | docker import - "$name/raw-iso"
 }
 
+function prepare_stage_for_host() {
+    local host="$1"
+    local playbook="$2"
+    local source="$3"
+    local branch="$4"
+    local container_id
+
+    $real_docker container rm "$host" > /dev/null 2>&1 || true
+    sleep 2
+    for i in $(seq 1 15); do
+        for id in $($real_docker ps -q); do
+            if [[ "$($real_docker exec "$id" cat /tmp/stage-ready 2>/dev/null)" == "$host" ]]; then
+                container_id="$id"
+                if ! $real_docker rename "$container_id" "$host"; then
+                    # FIXME error message
+                    echo "Failed to work on the container $container_id. Aborting"
+                    end 1
+                fi
+                break 2
+            fi
+        done
+        if [[ "$i" == "14" ]]; then
+            # FIXME error message
+            end 1
+        fi
+        sleep 2
+    done
+
+    # Try to make the container nice
+    container_pid="$(ps aux | grep "$container_id" | grep -v grep | awk '{ print $2 }')"
+    renice -n 19 -p "$container_pid" > /dev/null 2>&1 || true
+    ionice -c 3 -p "$container_pid" > /dev/null 2>&1 || true
+
+    imginfo_update="$(echo "\n\
+    - date: $(date --iso-8601=seconds)\n\
+      playbook: ${playbook}\n\
+      hostname: ${host}\n\
+      source: ${source}\n\
+      git-sha1: $(git rev-parse HEAD)\n\
+      git-branch: ${branch}\n")"
+    $real_docker exec "$id" echo "$imginfo_update" >> /imginfo
+    echo -e "\n[all]\n$host\n" >> ansible/${ANSIBLE_ROOT_DIR:-.}/inventory
+
+    $real_docker exec "$id" touch /tmp/stage-begin
+    exit 0
+}
+
+function apply_stage() {
+    local source_name="$1"
+    shift
+    local prefix_name="$1"
+    shift
+    local add_host_to_prefix="$1"
+    shift
+    local stage="$1"
+    shift
+    hosts=$*
+
+    local pids_docker_build=()
+    local pids_prepare_stage=()
+    local hosts_built=()
+    local local_prefix=""
+    local local_source_name=""
+
+
+    if [[ "$stage" = *"@"* ]]; then
+        local_branch="$(echo $stage | cut -d'@' -f1)"
+        local_pb="$(echo $stage | cut -d'@' -f2)"
+    else
+        local_branch="$_arg_branch"
+        local_pb="$stage"
+    fi
+
+    export GIT_SSH_COMMAND="ssh -i $(pwd)/$_arg_ssh_priv_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+    cd ansible/${ANSIBLE_ROOT_DIR:-.}
+    git fetch
+    [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/$local_branch)" ]] || git reset "origin/$local_branch" --hard
+    cd -
+
+    echo "Applying stage $stage to $source_name (playbook $local_pb from branch $local_branch) on $hosts"
+    for host in $hosts; do
+        if [[ "$add_host_to_prefix" == "yes" ]]; then
+            local_prefix="$prefix_name/$host"
+            local_source_name="$(echo $source_name | sed -e s,HOSTNAME,"$host", )"
+        else
+            local_prefix="$prefix_name"
+            local_source_name="$source_name"
+        fi
+        docker image inspect "$local_source_name" > /dev/null 2>&1 || pull_image "$local_source_name"
+        { set -x; trap - ERR;
+            docker build \
+                --build-arg SOURCE="${local_source_name}" \
+                --build-arg HOST_NAME="$host" \
+                --no-cache \
+                -t "${local_prefix}/${local_pb}" \
+                -f Dockerfile.external-stages .
+        } > "$vauban_log_path/vauban-docker-build-${vauban_start_time}/${host}.log" 2>&1 &
+        pids_docker_build+=("$!")
+        hosts_built+=("$host")
+        { set -x; trap - ERR;
+            prepare_stage_for_host "$host" "$local_pb" "$local_source_name" "$local_branch" "$last_container_id"
+        } > "$vauban_log_path/vauban-prepare-stage-${vauban_start_time}/${host}.log" 2>&1 &
+        pids_prepare_stage+=("$!")
+    done
+
+    wait_pids "pids_prepare_stage" "hosts_built" "prepare stage"
+
+    cd ansible/${ANSIBLE_ROOT_DIR:-.}
+    eval "$HOOK_PRE_ANSIBLE"
+    export ANSIBLE_ANY_ERRORS_FATAL=True
+    export ANSIBLE_BECOME_ALLOW_SAME_USER=False
+    export ANSIBLE_KEEP_REMOTE_FILES=True
+    if eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c community.docker.docker_api -v $ANSIBLE_EXTRA_ARGS; then
+        file_to_touch=/tmp/stage-built
+    else
+        file_to_touch=/tmp/stage-failed
+    fi
+        for host in $hosts; do
+            docker exec "$host" touch "$file_to_touch"
+        done
+    eval "$HOOK_POST_ANSIBLE"
+
+    wait_pids "pids_docker_build" "hosts_built" "build stage $stage"
+    wait
+
+    cd -
+}
+
 function apply_stages() {
     # apply_stages will go from the image $source_name and will create $final_name by applying $stages
     # $prefix_name is the common prefix name to all the intermediate steps.
@@ -23,41 +151,38 @@ function apply_stages() {
     shift
     local prefix_name="$1"
     shift
+    local add_host_to_prefix="$1"
+    shift
     local final_name="$1"
     shift
-    local hostname="$1"
-    shift
     stages=$*
+
+    local local_source_name=""
+    local local_final_name=""
 
     docker image inspect "$source_name" > /dev/null 2>&1 || pull_image "$source_name"
 
     local iter_source_name="$source_name"
 
     for stage in $stages; do
-        if [[ "$stage" = *"@"* ]]; then
-            local_branch="$(echo $stage | cut -d'@' -f1)"
-            local_pb="$(echo $stage | cut -d'@' -f2)"
+        apply_stage "$iter_source_name" "$prefix_name" "$add_host_to_prefix" "$stage" $hosts
+        if [[ "$add_host_to_prefix" == "yes" ]]; then
+            iter_source_name="${prefix_name}/HOSTNAME/${local_pb}"
         else
-            local_branch="$_arg_branch"
-            local_pb="$stage"
+            iter_source_name="${prefix_name}/${local_pb}"
         fi
-        echo "Applying stage $stage to $iter_source_name (playbook $local_pb from branch $local_branch)"
-        docker build \
-            --build-arg SOURCE="${iter_source_name}" \
-            --build-arg PLAYBOOK="$local_pb" \
-            --build-arg BRANCH="$local_branch" \
-            --build-arg HOOK_PRE_ANSIBLE="${HOOK_PRE_ANSIBLE:-}" \
-            --build-arg HOOK_POST_ANSIBLE="${HOOK_POST_ANSIBLE:-}" \
-            --build-arg ANSIBLE_EXTRA_ARGS="${ANSIBLE_EXTRA_ARGS:-}" \
-            --build-arg ANSIBLE_ROOT_DIR="${ANSIBLE_ROOT_DIR:-}" \
-            --build-arg HOSTNAME="$hostname" \
-            --no-cache \
-            -t "${prefix_name}/${local_pb}" \
-            -f Dockerfile.stages .
-        iter_source_name="${prefix_name}/${local_pb}"
     done
-    echo "Tagging $final_name on $iter_source_name"
-    docker tag "$iter_source_name" "$final_name"
+    for host in $hosts; do
+        if [[ "$add_host_to_prefix" == "yes" ]]; then
+            local_source_name="$(echo $iter_source_name | sed -e s,HOSTNAME,"$host", )"
+            local_final_name="$final_name/$host"
+        else
+            local_source_name="$iter_source_name"
+            local_final_name="$final_name"
+        fi
+        echo "Tagging $local_final_name on $local_source_name"
+        docker tag "$local_source_name" "$local_final_name" > /dev/null 2>&1
+    done
 }
 
 function import_iso() {
@@ -65,13 +190,12 @@ function import_iso() {
     name="$1"
     docker_import "$name"
     docker build \
-        --build-arg SSH_KEY="$(cat "$_arg_ssh_priv_key")" \
-        --build-arg CACHE="$(date)" \
         --build-arg SOURCE="${name}/raw-iso" \
         --build-arg ISO="$_arg_iso" \
-        --build-arg BRANCH="$_arg_branch" \
+        --build-arg VAUBAN_SHA1="$(git rev-parse HEAD || echo unspecified)" \
+        --no-cache \
         -t "${name}/iso" \
-        -f Dockerfile.base .
+        -f Dockerfile.external-base .
 }
 
 function put_sshd_keys() {
@@ -105,7 +229,7 @@ function put_sshd_keys() {
     cd ..
 }
 
-function build_rootfs() {
+function export_rootfs() {
     local image_name="$1"
 
     rm -rf tmp && mkdir tmp
@@ -130,13 +254,28 @@ EOF
     tar cvf rootfs.tgz rootfs.img
 }
 
+function build_rootfs() {
+    local source_name="$1"
+    shift
+    local prefix_name="$1"
+    shift
+    local final_name="$1"
+    shift
+    local hostname="$1"
+    shift
+    stages=$*
+
+    hosts="$hostname"
+    apply_stages "$source_name" "$prefix_name" "no" "$final_name" "$stages"
+    export_rootfs "$final_name"
+}
+
 function build_conffs_given_host() {
     local host="$1"
     local source_name="$2"
     local prefix_name="$3"
 
     printf "Building conffs for host=%s" "$host"
-    apply_stages "$source_name" "$prefix_name" "$prefix_name" "$host" "${_arg_stages[@]}"
     mkdir -p overlayfs && cd overlayfs
     overlayfs_args=""
     first="yes"
@@ -193,40 +332,18 @@ function build_conffs() {
     local prefix_name="$2"
     local pids=()
     local hosts_built=()
-    local i
-    i=0
-    mkdir -p /tmp/vauban-logs/
-    local build_time
-    build_time="$(date --iso-8601=seconds)"
+
+    apply_stages "$source_name" "$prefix_name" "yes" "$prefix_name" "${_arg_stages[@]}"
+
     add_section_to_recap "build_conffs: Hosts recap"
     add_content_to_recap ""  # newline
     for host in $hosts; do
         host_prefix_name="$prefix_name/$host"  # All intermediate images will be named name/host/stage
         # with name being the name of the OS being installed, like debian-10.8
-        { set -x; trap - ERR; build_conffs_given_host "$host" "$source_name" "$host_prefix_name" > /tmp/vauban-logs/"$prefix_name-$host-$build_time" ; } &
-        pids+=("$!")
-        hosts_built+=("$host")
-        i=$((i + 1))
-        if [[ $((i % 20)) -eq 0 ]]; then
-            wait_pids "pids" "hosts_built"
-            pids=()
-            hosts_built=()
-        fi
+        build_conffs_given_host "$host" "$source_name" "$host_prefix_name"
     done
-    wait_pids "pids" "hosts_built"
-    wait
     add_content_to_recap ""  # newline
-    if [[ -n "${CI}" ]]; then
-        add_to_recap "build_conffs: logs" "$(
-            for f in $(find /tmp/vauban-logs/ -type f); do
-                echo $f
-                echo
-                tail -n 50 "$f" || true
-                echo
-            done)"
-    else
-        add_to_recap "build_conffs: logs" "Conffs built. Check the build details in /tmp/vauban-logs/*-$build_time"
-    fi
+    add_to_recap "build_conffs: logs" "Conffs built"
     ci_commit_sshd_keys
 }
 
