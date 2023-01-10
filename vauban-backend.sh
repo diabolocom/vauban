@@ -359,3 +359,42 @@ function upload() {
         fi
     done
 }
+
+function build_kernel() {
+    mount_iso
+    umount linux-build || true
+    rm -rf linux-build
+    mkdir linux-build && cd linux-build
+    mkdir upperdir workdir merged && cd ..
+
+    mount -t overlay overlay -o rw,lowerdir="./fs-$_arg_iso",workdir=./linux-build/workdir,upperdir=./linux-build/upperdir linux-build/merged
+
+    mkdir -p linux-build/merged/patches
+    cp patches/* linux-build/merged/patches/
+
+    while true; do sleep 1000; done
+    chroot "linux-build/merged" bin/bash || true  << EOF
+    apt-get install -y build-essential fakeroot devscripts ccache
+    apt-get build-dep -y linux
+    cd /root
+    set -xe
+    linux_pkg_ver="$(dpkg -s linux-image-amd64 | grep Version | cut -d' ' -f 2)"
+    dget -u "https://deb.debian.org/debian/pool/main/l/linux/linux_${linux_pkg_ver}.dsc"
+    linux_pkg_ver_short="$(find -maxdepth 1 -type d -name "linux-*" | cut -d- -f2)"
+    cd linux-"$linux_pkg_ver_short"
+    for patch in /patches/*; do
+        patch -p1 < "$patch"
+    done
+
+    nice -n19 fakeroot debian/rules source
+    nice -n19 fakeroot make -f debian/rules.gen setup_amd64_none_amd64 -j$(nproc)
+    nice -n19 fakeroot make -f debian/rules.gen build-arch_amd64_none -j$(nproc)
+    DEBIAN_KERNEL_USE_CCACHE=true nice -n19 fakeroot make -j$(nproc) -f debian/rules.gen binary-arch_amd64_none_amd64
+    cd ..
+    ar x linux*image*unsigned*deb > /dev/null
+    tar xvf data.tar.xz > /dev/null
+    cp ./boot/vmlinuz-* /vmlinuz
+EOF
+    while true; do sleep 1000; done
+    umount linux-build/merged
+}

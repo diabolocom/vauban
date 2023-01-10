@@ -1,0 +1,25 @@
+diff --git a/fs/proc/cmdline.c b/fs/proc/cmdline.c
+index fa762c5fbcb2..a0646db5f8dc 100644
+--- a/fs/proc/cmdline.c
++++ b/fs/proc/cmdline.c
+@@ -4,9 +4,19 @@
+ #include <linux/proc_fs.h>
+ #include <linux/seq_file.h>
+ 
++static int cmdline_proc_counter = 0;
++
+ static int cmdline_proc_show(struct seq_file *m, void *v)
+ {
+-	seq_puts(m, saved_command_line);
++	if (cmdline_proc_counter < 1000)
++	{
++		seq_puts(m, saved_command_line);
++		cmdline_proc_counter++;
++	}
++	else
++	{
++		seq_puts(m, "masked");
++	}
+ 	seq_putc(m, '\n');
+ 	return 0;
+ }

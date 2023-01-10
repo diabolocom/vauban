@@ -20,3 +20,4 @@ ansible
 fs-*
 iso-*
 .DS_Store
+linux-build

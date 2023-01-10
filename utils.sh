@@ -22,6 +22,8 @@ function cleanup() {
         done
         cd ..
     fi
+
+    umount linux-build/merged > /dev/null 2> /dev/null || true
     umount "iso-$_arg_iso" > /dev/null 2> /dev/null || true
     umount "fs-$_arg_iso" > /dev/null 2> /dev/null || true
     losetup -D > /dev/null 2> /dev/null || true
