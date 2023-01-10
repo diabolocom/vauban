@@ -18,7 +18,7 @@ workflow:
   before_script:
     - echo $DOT_SECRETS_ENV | base64 -d > .secrets.env
   script:
-    - python3 ci.py
+    - python3 vauban.py
   after_script:
     - rm -rf .secrets.env
 

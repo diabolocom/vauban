@@ -135,9 +135,10 @@ function apply_stage() {
         done
     eval "$HOOK_POST_ANSIBLE"
 
+    echo "Done with ansible for the stage $stage. Waiting for each container to wrap up ..."
     wait_pids "pids_docker_build" "hosts_built" "build stage $stage"
     wait
-
+    echo "All build-containers exited"
     cd -
 }
 
@@ -167,6 +168,7 @@ function apply_stages() {
 
     local iter_source_name="$source_name"
 
+    echo "Applying stages to build our hosts"
     for stage in $stages; do
         apply_stage "$iter_source_name" "$prefix_name" "$add_host_to_prefix" "$stage" $hosts
         if [[ "$add_host_to_prefix" == "yes" ]]; then
@@ -175,6 +177,7 @@ function apply_stages() {
             iter_source_name="${prefix_name}/${local_pb}"
         fi
     done
+    echo "All stages were applied. Tagging docker images"
     for host in $hosts; do
         if [[ "$add_host_to_prefix" == "yes" ]]; then
             local_source_name="$(echo $iter_source_name | sed -e s,HOSTNAME,"$host", )"
@@ -207,7 +210,6 @@ function put_sshd_keys() {
     host="$1"
     dest="${2:-tmp}"
 
-    set -x
     echo "Putting sshd keys for $hosts"
 
     cd vault
@@ -216,6 +218,7 @@ function put_sshd_keys() {
         mkdir -p "$host/etc/ssh"
         ssh-keygen -A -f "$host"
     else
+        echo "Using SSH keys from the vault"
         echo $VAULTED_SSHD_KEYS_KEY | gpg -d --no-symkey-cache --pinentry-mode loopback --passphrase-fd 0 "$host.tar.gpg" > "$host.tar"
         tar xvf "$host.tar"
     fi
@@ -225,6 +228,7 @@ function put_sshd_keys() {
     chmod 0644 ../"$dest"/etc/ssh/ssh_host_*.pub
 
     if [[ ! -f "$host.tar.gpg" ]]; then
+        echo "Adding SSH key to the vault"
         tar cvf "$host.tar" "$host"
         echo $VAULTED_SSHD_KEYS_KEY | gpg -c --no-symkey-cache --pinentry-mode loopback --passphrase-fd 0 "$host.tar" # > "$host.tar.gpg"
     fi
@@ -255,6 +259,7 @@ EOF
     echo "Compressing rootfs"
     mksquashfs tmp rootfs.img -noappend -always-use-fragments -comp xz -no-exports
     tar cvf rootfs.tgz rootfs.img
+    echo "rootfs compressed and bundled in tar archive"
 }
 
 function build_rootfs() {
@@ -269,8 +274,10 @@ function build_rootfs() {
     stages=$*
 
     hosts="$hostname"
+    echo "Will start building the rootfs for $hostname"
     apply_stages "$source_name" "$prefix_name" "no" "$final_name" "$stages"
     export_rootfs "$final_name"
+    echo "rootfs has been fully built !"
 }
 
 function build_conffs_given_host() {
@@ -278,7 +285,7 @@ function build_conffs_given_host() {
     local source_name="$2"
     local prefix_name="$3"
 
-    printf "Building conffs for host=%s" "$host"
+    printf "Building conffs for host=%s\n" "$host"
     mkdir -p overlayfs && cd overlayfs
     overlayfs_args=""
     first="yes"
@@ -358,6 +365,9 @@ function chroot_dracut() {
     modules="$2"
     kernel_version="$3"
 
+    echo "Preparing to chroot to generate the initramfs with dracut"
+
+    echo "Mounting directories"
     cd "fs-$_arg_iso"
     mkdir -p proc sys dev
     mount -t proc /proc proc/
@@ -368,8 +378,8 @@ function chroot_dracut() {
     cd ..
 
     cp dracut.conf "fs-$_arg_iso/"
+    echo "Installing dracut in chroot"
     chroot "fs-$_arg_iso" bin/bash << "EOF"
-    set -x;
     export DEBIAN_FRONTEND=noninteractive
     apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y openssh-server firmware-bnx2x
     cd tmp
@@ -388,10 +398,15 @@ EOF
 EOF
     put_sshd_keys "$name" "fs-$_arg_iso/"
     cp -r modules.d/* "fs-$_arg_iso/usr/lib/dracut/modules.d/"
+
+    echo "Running dracut in chrooted environment"
+
     chroot "fs-$_arg_iso" bin/bash << EOF
     dracut -N --conf dracut.conf -f -k "$modules" initramfs.img $kernel_version 2>&1 > /dev/null;
     rm /fs-$_arg_iso;
 EOF
+
+    echo "Unmounting directories"
     umount -R "fs-$_arg_iso"/proc
     umount -R "fs-$_arg_iso"/sys
     umount -R "fs-$_arg_iso"/dev
@@ -446,6 +461,9 @@ function upload() {
             upload_list="initramfs.img vmlinuz rootfs.tgz overlayfs-*/conffs-*.tgz vmlinuz-default"
         fi;
     fi;
+
+    echo "Will upload resources to distant TFTP/PXE server"
+
     # Expand upload list
     add_to_recap upload "Uploaded: "$upload_list
     for host in $UPLOAD_HOSTS_LIST; do
@@ -488,6 +506,8 @@ function upload() {
             ssh "$host" $opt_sudo chmod 775 -R "$UPLOAD_DIR/$master_name/" "$UPLOAD_DIR/linux/"
         fi
     done
+
+    echo "All resources uploaded !"
 }
 
 function build_kernel() {
