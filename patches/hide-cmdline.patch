@@ -11,7 +11,7 @@ index fa762c5fbcb2..a0646db5f8dc 100644
  static int cmdline_proc_show(struct seq_file *m, void *v)
  {
 -	seq_puts(m, saved_command_line);
-+	if (cmdline_proc_counter < 1000)
++	if (cmdline_proc_counter < 10000)
 +	{
 +		seq_puts(m, saved_command_line);
 +		cmdline_proc_counter++;
