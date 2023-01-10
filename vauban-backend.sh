@@ -74,6 +74,8 @@ function apply_stage() {
     shift
     local stage="$1"
     shift
+    local in_conffs="$1"
+    shift
     hosts=$*
 
     local pids_docker_build=()
@@ -110,6 +112,7 @@ function apply_stage() {
             docker build \
                 --build-arg SOURCE="${local_source_name}" \
                 --build-arg HOST_NAME="$host" \
+                --build-arg IN_CONFFS="$in_conffs" \
                 --no-cache \
                 -t "${local_prefix}/${local_pb}" \
                 -f Dockerfile.external-stages .
@@ -163,6 +166,8 @@ function apply_stages() {
     shift
     local final_name="$1"
     shift
+    local in_conffs="$1"
+    shift
     stages=$*
 
     local local_source_name=""
@@ -174,7 +179,7 @@ function apply_stages() {
 
     echo "Applying stages to build our hosts"
     for stage in $stages; do
-        apply_stage "$iter_source_name" "$prefix_name" "$add_host_to_prefix" "$stage" $hosts
+        apply_stage "$iter_source_name" "$prefix_name" "$add_host_to_prefix" "$stage" "$in_conffs" $hosts
         if [[ "$add_host_to_prefix" == "yes" ]]; then
             iter_source_name="${prefix_name}/HOSTNAME/${local_pb}"
         else
@@ -279,7 +284,7 @@ function build_rootfs() {
 
     hosts="$hostname"
     echo "Will start building the rootfs for $hostname"
-    apply_stages "$source_name" "$prefix_name" "no" "$final_name" "$stages"
+    apply_stages "$source_name" "$prefix_name" "no" "$final_name" "no" "$stages"
     export_rootfs "$final_name"
     echo "rootfs has been fully built !"
 }
@@ -347,7 +352,7 @@ function build_conffs() {
     local pids=()
     local hosts_built=()
 
-    apply_stages "$source_name" "$prefix_name" "yes" "$prefix_name" "${_arg_stages[@]}"
+    apply_stages "$source_name" "$prefix_name" "yes" "$prefix_name" "yes" "${_arg_stages[@]}"
 
     add_section_to_recap "build_conffs: Hosts recap"
     for host in $hosts; do
