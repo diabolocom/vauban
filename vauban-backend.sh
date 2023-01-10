@@ -34,7 +34,7 @@ function prepare_stage_for_host() {
                 break 2
             fi
         done
-        if [[ "$i" == "14" ]]; then
+        if [[ "$i" == "$((timeout - 1))" ]]; then
             echo "Waited to find our container for too long. Aborting .."
             end 1
         fi
@@ -211,7 +211,7 @@ function put_sshd_keys() {
     host="$1"
     dest="${2:-tmp}"
 
-    echo "Putting sshd keys for $hosts"
+    echo "Putting sshd keys for $host"
 
     cd vault
     if [[ ! -f "$host".tar.gpg ]]; then

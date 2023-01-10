@@ -53,9 +53,10 @@ class BuildConfig:
     def copy(self):
         return deepcopy(self)
 
-    def u_stage(self, stage):
+    def u_stage(self, stage, sub_build_parents=True):
         copy = self.copy()
         copy.stage = stage
+        copy.build_parents -= 1
         return copy
 
 class MasterNameType(click.ParamType):

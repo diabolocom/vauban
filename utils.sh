@@ -76,24 +76,26 @@ function get_rootfs_kernel_version() {
 function bootstrap_fs() {
     # We need some DNS to install the packages needed to generate the initramfs
     chroot "fs-$_arg_iso" bin/bash <<- "EOF"
-    set -x;
     rm -f /etc/resolv.conf;
     echo nameserver 8.8.8.8 > /etc/resolv.conf;
     echo "" > /etc/fstab;
     export DEBIAN_FRONTEND=noninteractive
     sed -i 's/main$/main contrib non-free/' /etc/apt/sources.list;
-    apt-get remove -y initramfs-tools grub2-common;
-    apt-get update;
-    apt-get install -y locales;
+    echo "Removing grub";
+    apt-get remove -y initramfs-tools grub2-common > /dev/null;
+    echo "Updating and installing some base packages";
+    apt-get update > /dev/null;
+    apt-get install -y locales > /dev/null;
     localedef -i en_US -f UTF-8 en_US.UTF-8
-    apt-get install -y lsb-release;
+    apt-get install -y lsb-release > /dev/null;
     echo "deb http://deb.debian.org/debian $(lsb_release -s -c)-proposed-updates main contrib non-free" >> /etc/apt/sources.list;
-    apt-get update;
-    apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y linux-image-amd64 linux-headers-amd64;
+    apt-get update > /dev/null;
+    echo "Updating linux kernel and headers";
+    apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y linux-image-amd64 linux-headers-amd64 > /dev/null;
     # remove old kernel/headers version.
     # List all linux headers/image, get only 'local' (meaning the one installed but not downloadable anymore, aka old kernel version)
     # extract package name and remove
-    apt-get remove -y $(apt list --installed 2>/dev/null | grep -E 'linux-(headers|image)-' | grep local 2>&1 | sed -E 's/\/.+$//g');
+    apt-get remove -y $(apt list --installed 2>/dev/null | grep -E 'linux-(headers|image)-' | grep local 2>&1 | sed -E 's/\/.+$//g') > /dev/null;
     apt-get autoremove -y;
 EOF
 }
@@ -120,8 +122,8 @@ function mount_iso() {
     fi
 
     if [[ -d "iso-$_arg_iso" ]]; then
-        umount "iso-$_arg_iso" || true
-        umount "fs-$_arg_iso" || true
+        umount "iso-$_arg_iso" > /dev/null 2>&1 || true
+        umount "fs-$_arg_iso" > /dev/null 2>&1 || true
         rm -rf "iso-$_arg_iso" "fs-$_arg_iso"
     fi
     mkdir "iso-$_arg_iso" "fs-$_arg_iso" -p
@@ -302,7 +304,9 @@ function set_deployed() {
         image="$REGISTRY/$image"
     fi
     "$real_docker" tag "$image:$tag" "$image:deployed"
+    echo "Pushing $image:deployed"
     docker push "$image:deployed"
+    echo "Pushed"
 }
 
 if [[ -n ${CI} ]]; then

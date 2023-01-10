@@ -86,7 +86,7 @@ function main() {
         fi
     fi
     if [[ "$_arg_initramfs" = "yes" ]]; then
-        [[ -z "$name" ]] && name="$_arg_name"
+        [[ -z "${name:-}" ]] && name="$_arg_name"
         build_initramfs "$name"
         kernel="./vmlinuz-default"
         kernel_version="$(get_kernel_version "$kernel")"
