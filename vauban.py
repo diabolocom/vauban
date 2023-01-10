@@ -144,14 +144,14 @@ class VaubanMaster:
         assert name != ""
         assert isinstance(value, dict)
         super().__init__()
-        self.name = name
         self.children: [VaubanMaster] = []
         self.parent: VaubanMaster = parent
         self.stages = value.get("stages", [])
         self.conffs = value.get("conffs", None)
         self.branch = value.get("branch", None)
         self.is_iso = parent is None
-        self.iso: str = self.name if self.is_iso else parent.iso
+        self.iso: str = name if self.is_iso else parent.iso
+        self.name = value.get('name', name)
         self.configuration: VaubanConfiguration = configuration
         for k, v in value.items():
             if isinstance(v, dict):
