@@ -446,12 +446,12 @@ def vauban(**kwargs):
 
     if not cc.debug:
         if cc.stage in ["rootfs", "all", "trueall"]:
-            print(f"Building successful ! {name} was built. Details:")
+            print(f"Building successful ! {cc.name} was built. Details:")
             subprocess.run(
-                f"docker run --rm {name} cat /imginfo".split(" "), check=False
+                f"docker run --rm {cc.name} cat /imginfo".split(" "), check=False
             )
         if cc.stage in ["conffs", "all", "trueall"]:
-            print(f"Building successful ! conffs for {name} was/were built.")
+            print(f"Building successful ! conffs for {cc.name} was/were built.")
         if cc.stage in ["initramfs", "all", "trueall", "kernel"]:
             print("Building successful !")
     return 0
