@@ -199,7 +199,7 @@ function wait_pids() {
         fi
     done
     if [[ "$must_exit" = "yes" ]]; then
-        add_to_recap "$job_name: details" "Job failed !. Check the build details in $recap_file or in /tmp/vauban/*$vauban_start_time/*.log"
+        add_to_recap "$job_name: details" "Job failed !. Check the build details in $recap_file or in $vauban_log_path/*$vauban_start_time/*.log"
         end 1
     fi
 }
@@ -225,7 +225,7 @@ Host *
 IdentityFile ~/.ssh/deploy_id_ed25519
 StrictHostKeyChecking accept-new
 EOF
-        set "+$VAUBAN_SET_FLAGS"
+        set "+x"
         echo "$UPLOAD_CI_SSH_KEY" | base64 -d > ~/.ssh/deploy_id_ed25519
         set "-$VAUBAN_SET_FLAGS"
         chmod 0600 ~/.ssh/deploy_id_ed25519
@@ -295,19 +295,23 @@ function set_deployed() {
     docker push "$image:deployed"
 }
 
-vauban_log_path=/tmp/vauban
+if [[ -n ${CI} ]]; then
+    vauban_log_path=./.tmp/vauban
+else
+    vauban_log_path=/tmp/vauban
+fi
 vauban_start_time="$(date --iso-8601=seconds)"
-recap_file="/tmp/vauban/vauban-recap-$vauban_start_time"
+recap_file="$vauban_log_path/vauban-recap-$vauban_start_time"
 
 function init_log() {
     mkdir -p "$vauban_log_path"
-    mkdir -p $vauban_log_path/vauban-docker-build-${vauban_start_time}
-    mkdir -p $vauban_log_path/vauban-prepare-stage-${vauban_start_time}
+    mkdir -p "$vauban_log_path/vauban-docker-build-${vauban_start_time}"
+    mkdir -p "$vauban_log_path/vauban-prepare-stage-${vauban_start_time}"
 }
 init_log
 
 function add_to_recap() {
-    set "+$VAUBAN_SET_FLAGS"
+    set "+x"
     local section="$1"
     shift
     local content="$@"
@@ -318,7 +322,7 @@ function add_to_recap() {
 }
 
 function add_content_to_recap() {
-    set "+$VAUBAN_SET_FLAGS"
+    set "+x"
     local content="$@"
 
     printf "%s\n" "$content" >> "$recap_file"
@@ -326,7 +330,7 @@ function add_content_to_recap() {
 }
 
 function add_section_to_recap() {
-    set "+$VAUBAN_SET_FLAGS"
+    set "+x"
     local section="$@"
 
     printf "\n\n============================\n%s\n============================\n\n" "$section" >> "$recap_file"
@@ -334,7 +338,7 @@ function add_section_to_recap() {
 }
 
 function print_recap() {
-    set "+$VAUBAN_SET_FLAGS"
+    set "+x"
 
     cat "$recap_file"
 
