@@ -330,10 +330,8 @@ if [ -n "$FSIMG" ]; then
             cp -v $FSIMG /run/initramfs/fsimg/rootfs.img
         else
             echo "VAUBAN/ unpack_archive" > /dev/kmsg
-            echo $FSIMG > /dev/kmsg
-            ls -l $FSIMG > /dev/kmsg
             mkdir -p /run/initramfs/fsming
-            #mount -t tmpfs -o size=4G tmpfs /run/initramfs/fsmimg
+            mount -t tmpfs -o size=4G tmpfs /run/initramfs/fsimg
             unpack_archive $FSIMG /run/initramfs/fsimg/
             find / -name 'rootfs.tgz' -size +50M -delete > /dev/kmsg
             ls -l $FSIMG || true > /dev/kmsg
@@ -359,11 +357,12 @@ if [ -n "$FSIMG" ]; then
         echo "vauban: losetup" > /dev/kmsg
         BASE_LOOPDEV=$(losetup -f --show $opt $FSIMG)
         sz=$(blockdev --getsz $BASE_LOOPDEV)
+        stat "$FSIMG" > /dev/kmsg
         echo "vauban: losetup done" > /dev/kmsg
     fi
     if [ "$setup" = rw ]; then
         echo 0 $sz linear $BASE_LOOPDEV 0 > /dev/kmsg
-        echo 0 $sz linear $BASE_LOOPDEV 0 | dmsetup create live-rw 2>&1 > /dev/kmsg
+        echo 0 $sz linear $BASE_LOOPDEV 0 | dmsetup create --checks live-rw -f -v  2>&1 > /dev/kmsg
     else
         # Add a DM snapshot or OverlayFS for writes.
         do_live_overlay

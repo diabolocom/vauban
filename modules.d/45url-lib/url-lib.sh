@@ -78,7 +78,7 @@ curl_fetch_url() {
         (
             cd "$outdir" || exit
             # shellcheck disable=SC2086
-            echo "executing $curl_args --remote-name $url" > /dev/kmsg
+            echo "executing curl $curl_args --remote-name $url" > /dev/kmsg
             curl $curl_args --remote-name "$url" || return $?
         )
         outloc="$outdir/$(ls -A "$outdir")"
