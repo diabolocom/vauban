@@ -132,6 +132,8 @@ function apply_stage() {
     export ANSIBLE_ANY_ERRORS_FATAL=True
     export ANSIBLE_BECOME_ALLOW_SAME_USER=False
     export ANSIBLE_KEEP_REMOTE_FILES=True
+    export ANSIBLE_TIMEOUT=60
+    export ANSIBLE_DOCKER_TIMEOUT=60
     if eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c community.docker.docker_api -v $ANSIBLE_EXTRA_ARGS; then
         file_to_touch=/tmp/stage-built
     else
