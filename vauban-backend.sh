@@ -347,13 +347,12 @@ function build_conffs() {
     apply_stages "$source_name" "$prefix_name" "yes" "$prefix_name" "${_arg_stages[@]}"
 
     add_section_to_recap "build_conffs: Hosts recap"
-    add_content_to_recap ""  # newline
     for host in $hosts; do
         host_prefix_name="$prefix_name/$host"  # All intermediate images will be named name/host/stage
         # with name being the name of the OS being installed, like debian-10.8
         build_conffs_given_host "$host" "$source_name" "$host_prefix_name"
+        add_content_to_recap "$host: success"
     done
-    add_content_to_recap ""  # newline
     add_to_recap "build_conffs: logs" "Conffs built"
     ci_commit_sshd_keys
 }

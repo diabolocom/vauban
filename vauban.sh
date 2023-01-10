@@ -2,22 +2,21 @@
 
 # Building images with dracut and docker
 
-# shellcheck disable=SC2029
-
 set -eEo pipefail
 
+# shellcheck source=vauban-config.sh
 source vauban-config.sh
+# shellcheck source=utils.sh
 source utils.sh
+# shellcheck source=vauban-backend.sh
 source vauban-backend.sh
 
 set "-$VAUBAN_SET_FLAGS"
 
 trap 'catch_err' ERR
-trap 'end 1' 10
+trap 'end 1' SIGUSR1
 
 [ "$(whoami)" != "root" ] && run_as_root
-
-DOCKER_IMAGES="$(docker image ls --format '{{ .Repository }}')"
 
 function check_args() {
     if [[ "$_arg_rootfs" = "yes" ]]; then
@@ -79,6 +78,11 @@ function main() {
             build_conffs "$_arg_source_image" "$prefix_name"
         else
             build_conffs "$_arg_name" "$prefix_name"
+        fi
+        # Set the kernel_version variable to an empty string if not already defined
+        # We don't need it to upload only the conffs
+        if [[ -z "${kernel_version:-}" ]]; then
+            kernel_version=""
         fi
     fi
     if [[ "$_arg_initramfs" = "yes" ]]; then

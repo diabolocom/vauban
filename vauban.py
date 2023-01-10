@@ -6,21 +6,70 @@
 Manage vauban with simple arguments
 """
 
-from __future__ import annotations
+from __future__ import annotations  # Requires python >= 3.7
 import sys
 import os
 import subprocess
-import json
 import traceback
-import yaml
-import click
+import json
+from copy import deepcopy
+from dataclasses import dataclass
 
+# Import external module and print an nice error message if module is not found
+for module, module_name in [('yaml', 'pyyaml'), ('click', 'click')]:
+    try:
+        globals()[module] = __import__(module)
+    except ModuleNotFoundError :
+        print(f'Unable to import module: {module_name}')
+        print('Try to install it:')
+        print('- With pip (and optionnal venv)')
+        print('	[Setup your venv] python -m venv venv && source venv/bin/activate')
+        print(f'	pip install --user {module_name}')
+        print('- With your package manager:')
+        print(f'	apt install -y python3-{module_name}')
+        print(f'	pacman -S python-{module}')
+        print(f'	apk add --no-cache py3-{module}')
+        exit(1)
 
 class NothingToDoException(Exception):
     """
     Dummy exception class
     """
 
+@dataclass
+class BuildConfig:
+    """
+    Store build configuration, the cli arguments, as an object
+    """
+    name: str
+    stage: str
+    branch: str
+    debug: bool
+    check: bool
+    config_path: str
+    build_parents: int
+    conffs: str
+
+    def copy(self):
+        return deepcopy(self)
+
+    def u_stage(self, stage):
+        copy = self.copy()
+        copy.stage = stage
+        return copy
+
+class MasterNameType(click.ParamType):
+    name = "mastername"
+
+    def shell_complete(self, ctx, param, incomplete):
+        try:
+            config = VaubanConfiguration()
+        except FileNotFoundError:
+            return []
+        return [
+            click.shell_completion.CompletionItem(name)
+            for name in config.list_masters() if name.startswith(incomplete)
+        ]
 
 class VaubanConfiguration:
     """
@@ -134,16 +183,19 @@ class VaubanMaster:
             r += c.list_masters()
         return r
 
-    def _build_stage(self, stage, branch, debug, check):
+    def _build_stage(self, cc):
         """
         Internal build function. Actually performs the build if not in debug
         mode
         """
 
-        assert stage in ["rootfs", "initramfs", "conffs", "kernel"]
+        assert cc.stage in ["rootfs", "initramfs", "conffs", "kernel"]
 
-        if branch is None or branch == "ansible-branch-name-here":
+        if cc.branch is None or cc.branch == "ansible-branch-name-here":
             branch = self.branch or "master"
+        else:
+            branch = cc.branch
+
         if os.path.isfile(f"/srv/iso/{self.iso}"):
             iso_path = f"/srv/iso/{self.iso}"
         elif os.path.isfile(self.iso):
@@ -166,41 +218,41 @@ class VaubanMaster:
         ]
 
         # Auto expand vauban CLI based on the current stage
-        vauban_cli = STAGES[stage](self.configuration.config, vauban_cli, self)
+        vauban_cli = STAGES[cc.stage](self.configuration.config, vauban_cli, self)
 
-        if debug:
+        if cc.debug:
             print(" ".join(['"' + x + '"' for x in vauban_cli]))
-        if check:
+        if cc.check:
             return
         my_env = os.environ.copy()
-        if debug:
+        if cc.debug:
             my_env["VAUBAN_SET_FLAGS"] = my_env.get("VAUBAN_SET_FLAGS", "") + "x"
         process = subprocess.run(vauban_cli, check=True, env=my_env)
         assert process.returncode == 0
 
-    def build(self, stage, branch, debug, check, build_parents):
+    def build(self, cc):
         """
         Build this master with the given parameters. "Recursive" function,
         it handles the cases where stage=[all, trueall] and build_parents
         option
         """
-        if build_parents != 0:
-            if stage in ["rootfs", "all", "trueall"]:
+        if cc.build_parents != 0:
+            if cc.stage in ["rootfs", "all", "trueall"]:
                 if self.parent is not None:
-                    self.parent.build("rootfs", branch, debug, check, build_parents - 1)
+                    self.parent.build(cc.u_stage("rootfs"))
             else:
-                self.build("rootfs", branch, debug, check, build_parents - 1)
-        if stage in ["all", "trueall"]:
-            self._build_stage("rootfs", branch, debug, check)
+                self.build(cc.u_stage("rootfs"))
+        if cc.stage in ["all", "trueall"]:
+            self._build_stage(cc.u_stage("rootfs"))
             try:
-                self._build_stage("conffs", branch, debug, check)
+                self._build_stage(cc.u_stage("conffs"))
             except NothingToDoException:
                 pass
-            self._build_stage("initramfs", branch, debug, check)
-            if stage == "trueall":
-                self._build_stage("kernel", branch, debug, check)
+            self._build_stage(cc.u_stage("initramfs"))
+            if cc.stage == "trueall":
+                self._build_stage(cc.u_stage("kernel"))
         else:
-            self._build_stage(stage, branch, debug, check)
+            self._build_stage(cc)
 
 
 def rootfs(config, vauban_cli, master, only=True):  # pylint: disable=unused-argument
@@ -302,6 +354,7 @@ STAGES = {
     "--name",
     default="master-11-netdata",
     show_default=True,
+    type=MasterNameType(),
     help="Name of the master to build",
 )
 @click.option(
@@ -347,28 +400,35 @@ STAGES = {
     show_default=True,
     help="How many parent objects to build",
 )
-def main(name, stage, branch, debug, check, config_path, build_parents):
+@click.option(
+    "--conffs",
+    default=None,
+    show_default=True,
+    help="Override config's conffs for the master to build. Useful to build the conffs for one host or hosts only while keeping a proper config file"
+)
+def vauban(**kwargs):
     """
     Wrapper around vauban.sh for ease of use. Uses a config file to generate
     vauban.sh commands
     """
-    if check:
-        debug = True
+    cc = BuildConfig(**kwargs)
+    if cc.check:
+        cc.debug = True
 
-    config = VaubanConfiguration(config_path)
-    master = config.get_master(name)
+    config = VaubanConfiguration(cc.config_path)
+    master = config.get_master(cc.name)
 
     if master is None:
         print(f"Cannot build {name}: not found in {config_path}")
         return 1
-    if debug:
+    if cc.debug:
         print("Available masters:")
         print(json.dumps(config.list_masters(), indent=4))
         print("Selected master:")
         print(repr(master))
 
     try:
-        master.build(stage, branch, debug, check, build_parents)
+        master.build(cc)
     except NothingToDoException as e:
         if os.environ.get("CI", None) is None:
             traceback.print_exception(e)
@@ -377,25 +437,26 @@ def main(name, stage, branch, debug, check, config_path, build_parents):
         print("Building failed !")
         return 1
     except Exception as e:
-        traceback.print_exception(e)
+        exc_info = sys.exc_info()
+        traceback.print_exception(*exc_info)
         print()
         print("Building failed !")
         return 1
 
-    if not debug:
-        if stage in ["rootfs", "all", "trueall"]:
+    if not cc.debug:
+        if cc.stage in ["rootfs", "all", "trueall"]:
             print(f"Building successful ! {name} was built. Details:")
             subprocess.run(
                 f"docker run --rm {name} cat /imginfo".split(" "), check=False
             )
-        if stage in ["conffs", "all", "trueall"]:
+        if cc.stage in ["conffs", "all", "trueall"]:
             print(f"Building successful ! conffs for {name} was/were built.")
-        if stage in ["initramfs", "all", "trueall", "kernel"]:
+        if cc.stage in ["initramfs", "all", "trueall", "kernel"]:
             print("Building successful !")
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(
-        main(auto_envvar_prefix="VAUBAN")
+        vauban(auto_envvar_prefix="VAUBAN")
     )  # pylint: disable=no-value-for-parameter

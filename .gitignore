@@ -21,3 +21,7 @@ fs-*
 iso-*
 .DS_Store
 linux-build
+
+# python
+vauban.egg-info
+__pycache__

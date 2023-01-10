@@ -217,7 +217,7 @@ function ci_commit_sshd_keys() {
 
 
 function bootstrap_upload_in_ci() {
-    if [[ -n ${CI} ]]; then
+    if [[ -n ${CI:-} ]]; then
         mkdir -p ~/.ssh
         cat >> ~/.ssh/config << EOF
 Host *
