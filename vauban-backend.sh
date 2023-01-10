@@ -170,6 +170,10 @@ function build_conffs_given_host() {
     if [[ -d toslash ]]; then cp -r toslash/* . && rm -rf toslash; fi
     rm -rf var/lib/apt/lists/*
     cd ..
+    # There is a bug in old version of overlayfs where whiteout are not well understood and
+    # are kept as buggy char devices on the merged dir. Touching the file and removing
+    # it fixes this
+    find -type c -exec bash -c 'stat {} >/dev/null 2>/dev/null || (touch {} && rm {})' \;
     tar cvfz "conffs-$host.tgz" \
         -C merged \
         --exclude "var/log" \
