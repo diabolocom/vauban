@@ -363,21 +363,6 @@ if [ -n "$FSIMG" ]; then
     fi
     if [ "$setup" = rw ]; then
         echo 0 $sz linear $BASE_LOOPDEV 0 > /dev/kmsg
-        echo "---" > /dev/kmsg
-        blkid > /dev/kmsg
-        echo "---" > /dev/kmsg
-        blkid -o udev > /dev/kmsg
-        echo "---" > /dev/kmsg
-        mount -l > /dev/kmsg
-        echo "---mo" > /dev/kmsg
-while IFS= read -r line; do mp=$(echo $line | grep -Po ' /[^ ]* ' | grep -Po '[^ ]+'); if [ "$(stat -c %b -f $mp)" != "0" ]; then printf '%s - %s/%s\n' $mp $(($(stat -c '%f * %s' -f $mp) / 1024 / 1024)) $(( $(stat -c '%s * %b' -f $mp) / 1024 / 1024 )); fi; done <<< "$(mount)" > /dev/kmsg
-        #mount -o remount,size=4G /run
-        #mount -o remount,size=4G /run/lock
-        #mount -o remount,size=4G /dev
-        #mount -o remount,size=4G /dev/shm
-        echo "---mo" > /dev/kmsg
-while IFS= read -r line; do mp=$(echo $line | grep -Po ' /[^ ]* ' | grep -Po '[^ ]+'); if [ "$(stat -c %b -f $mp)" != "0" ]; then printf '%s - %s/%s\n' $mp $(($(stat -c '%f * %s' -f $mp) / 1024 / 1024)) $(( $(stat -c '%s * %b' -f $mp) / 1024 / 1024 )); fi; done <<< "$(mount)" > /dev/kmsg
-        echo "---" > /dev/kmsg
         echo 0 $sz linear $BASE_LOOPDEV 0 | dmsetup create live-rw 2>&1 > /dev/kmsg
     else
         # Add a DM snapshot or OverlayFS for writes.
