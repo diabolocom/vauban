@@ -92,8 +92,7 @@ function main() {
         kernel_version="$(get_kernel_version "$kernel")"
     fi
     if [[ "$_arg_kernel" = "yes" ]]; then
-        end 0  # FIXME
-        [[ -z "$name" ]] && name="$_arg_name"
+        [[ -z "${name:-}" ]] && name="$_arg_name"
         build_kernel "$name"
         kernel="./vmlinuz"
         kernel_version="$(get_kernel_version "$kernel")"

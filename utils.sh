@@ -161,7 +161,7 @@ function clone_ansible_repo() {
     cd ansible
     git config --global --add safe.directory "$(pwd)"
     git fetch
-    cd - > /dev/null
+    cd ..
 }
 
 function get_conffs_hosts() {
@@ -309,7 +309,7 @@ function set_deployed() {
     echo "Pushed"
 }
 
-if [[ -n ${CI} ]]; then
+if [[ -n ${CI:-} ]]; then
     vauban_log_path=$CI_BUILDS_DIR/.tmp/vauban
 else
     vauban_log_path=/tmp/vauban

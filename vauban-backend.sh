@@ -94,9 +94,9 @@ function apply_stage() {
     fi
 
     clone_ansible_repo
-    cd ansible/${ANSIBLE_ROOT_DIR:-.}
+    cd ansible
     [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/$local_branch)" ]] || git reset "origin/$local_branch" --hard
-    cd - > /dev/null
+    cd ..
 
     echo "Applying stage $stage to $source_name (playbook $local_pb from branch $local_branch) on $hosts"
     for host in $hosts; do
@@ -139,9 +139,9 @@ function apply_stage() {
     else
         file_to_touch=/tmp/stage-failed
     fi
-        for host in $hosts; do
-            docker exec "$host" touch "$file_to_touch"
-        done
+    for host in $hosts; do
+        docker exec "$host" touch "$file_to_touch"
+    done
     eval "$HOOK_POST_ANSIBLE"
 
     echo "Done with ansible for the stage $stage. Waiting for each container to wrap up ..."
