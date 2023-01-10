@@ -17,22 +17,24 @@ function prepare_stage_for_host() {
     local branch="$4"
     local container_id
 
+    # Let's make sure we work on the new container
+    $real_docker container stop "$host" > /dev/null 2>&1 || true
     $real_docker container rm "$host" > /dev/null 2>&1 || true
+
     sleep 2
     for i in $(seq 1 15); do
         for id in $($real_docker ps -q); do
             if [[ "$($real_docker exec "$id" cat /tmp/stage-ready 2>/dev/null)" == "$host" ]]; then
                 container_id="$id"
                 if ! $real_docker rename "$container_id" "$host"; then
-                    # FIXME error message
-                    echo "Failed to work on the container $container_id. Aborting"
+                    echo "Failed to rename container $container_id. Aborting"
                     end 1
                 fi
                 break 2
             fi
         done
         if [[ "$i" == "14" ]]; then
-            # FIXME error message
+            echo "Waited to find our container for too long. Aborting .."
             end 1
         fi
         sleep 2
