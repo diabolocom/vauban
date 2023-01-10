@@ -296,7 +296,7 @@ function set_deployed() {
 }
 
 if [[ -n ${CI} ]]; then
-    vauban_log_path=./.tmp/vauban
+    vauban_log_path=$CI_BUILDS_DIR/.tmp/vauban
 else
     vauban_log_path=/tmp/vauban
 fi
