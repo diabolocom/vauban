@@ -13,6 +13,7 @@ ARG ANSIBLE_EXTRA_ARGS
 
 
 RUN cd /root/ansible/$ANSIBLE_ROOT_DIR && \
+    pip3 install --upgrade ansible==6.6 && \
     export GIT_SSH_COMMAND="ssh -i /root/.ssh/vauban__id_ed25519 -o 'StrictHostKeyChecking no'" && \
     git fetch && \
     [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/$BRANCH)" ] || git reset origin/$BRANCH --hard && \
