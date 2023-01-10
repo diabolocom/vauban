@@ -146,7 +146,7 @@ def build(config, obj, stage, branch, debug, target_name):
     assert process.returncode == 0
 
 def recursive_build(config, obj, stage, branch, debug, target_name, parents_to_build):
-    if branch is None or branch == "master":
+    if branch is None or branch == "ansible-branch-name-here":
         branch = obj.get("branch", "master")
 
     if parents_to_build != 0:

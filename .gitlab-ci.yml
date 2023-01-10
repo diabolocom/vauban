@@ -57,7 +57,7 @@ variables:
     value: "debian-11-generic-amd64.raw"
     description: "The name of the master to build. Build definition must be provided in config.yml"
   branch:
-    value: "master"
+    value: "ansible-branch-name-here"
     description: "The name of the ansible branch to apply"
   rootfs:
     value: "yes"
