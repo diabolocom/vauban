@@ -1,4 +1,59 @@
-# How to use
+# What is Vauban ? 🏗️
+
+Vauban is an open-source image builder with Ansible and Docker integration,
+focused on IaC. It allows you to build in a hierarchical approach master images
+and their associated hosts-specific configuration to help you manage hundreds of
+hosts in a similar fashion.
+
+Vauban creates all the resources needed to boot via PXE or from local disk in a
+way where, by default, everything is in live-mode. This means that a reboot
+will erase all unwanted changes, helping you separate stateful data from
+configuration and applications.
+
+# Why is Vauban needed ? 🚚
+
+Vauban and the PXE/local live-image booting system is useful for many reasons:
+- Have better control of the OS, applications and configuration deployed on your
+  infra, even if there are thousands of hosts
+- Group easily hosts in a category where they will all depend on a "master" that
+  will hold all applications
+- The possibility to easily create host-specific lighweight configuration that
+  will be applied on top of the master at boot-time
+- Saving disk space with this unique-for-many-hosts master approach
+- Save yourself when a host is severly messed up by simply rebooting to a
+  working version, erasing all undesired changes
+- Better observe what changes were made
+- Avoid Ansible's well know flaw where resources not explicitly removed are
+  kept, like users or packages
+- Keeping your different hosts aligned to the same OS/package version to ease
+  out differences between similar servers and limit incompatibilities,
+  discrepancies or the famous "but it worked there !"
+- Have a better observability of differences between hosts
+- Have a better observability on what has been deployed and how a running host
+  has come to this state
+- Clearly establish what is stateful (and must be kept and backed-up) and what
+  is not
+- Have an IaC approach and all its benefits
+- Have the possibility to see what differences were made on a running host
+  from what it booted on initially
+- Use Ansible to manage the server configuration instead of custom bash scripts
+
+However, Vauban introduces some drawbacks that must be kept in mind:
+- Image build stage a bit harder that simply rolling out changes to already
+  running hosts
+- Being aware of this system and enforce a rebuild policy when changes are to be
+  made and kept
+
+# How to use 🔍
+
+## Dependencies
+
+In order to work, you need to setup:
+- A docker registry for vauban to store its images. The images might contain
+  secrets or configuration that must be kept private, so keep this in mind when
+  choosing a registry.
+- A distant server to upload created images.
+- An ansible repository
 
 ## Setup
 
@@ -114,7 +169,7 @@ parent is the parent from `config.yml`
 
 This concept is useful when you want to rebuild multiple elements from a chain.
 
-# Theory
+# Theory 🧑‍🏫
 
 The project is explained if further details on [zarak.fr](https://zarak.fr/linux/sre/vauban-en/),
 especially how it works and the rationals behind the project.
@@ -243,7 +298,9 @@ you reach the number of parent objects you want to update.
 
 To rebuild the whole chain, you can set `--build-parents` to `-1`
 
-# Ansible interaction
+# Limitations 🤕
+
+## Ansible interaction
 
 When running ansible, vauban sets a variable `in_vauban` to true, to help you
 make decisions in ansible workflow.
@@ -263,7 +320,7 @@ Please note a few things about ansible:
 machine's one). Any operations that needs to interact directly with the kernel
 won't work (sysctl, some build). You will have to find ways to overcome this.
 
-# docker interactions
+## docker interactions
 
 - As the docker engine is used to build the image, `/etc/hosts`, `/etc/hostname` and
   `/etc/resolv.conf` are automatically mounted in the container, and it cannot be
@@ -271,14 +328,14 @@ won't work (sysctl, some build). You will have to find ways to overcome this.
   in `/`. One can therefore write into /toslash/etc/hostname for example for it to
   be taken into account once exported.
 
-# dhcp manager
+## dhcp manager
 
-boot options:
+boot options for PXE booting could be looking like this:
 ```
-console=tty0 console=ttyS0,115200 net.ifnames=0 verbose rd.debug rd.shell rd.writable.fsimg=1 rd.luks=0 rd.lvm=0 rd.md=0 rd.dm=0 rd.neednet=1 rd.live.debug=1 rd.live.image rootflags=rw rootovl systemd.debug_shell
+console=tty0 console=ttyS0,115200 net.ifnames=0 verbose rd.debug rd.shell rd.writable.fsimg=1 rd.luks=0 rd.lvm=0 rd.md=0 rd.dm=0 rd.neednet=1 rd.live.debug=1 rd.live.image rootflags=rw rootovl systemd.debug_shell ip=eth0:dhcp:01:23:45:67:89:ab pxemac=01:23:45:67:89:ab boot=tmpfs live.updates=http://path/to/conffs root=live:http://path/to/rootfs
 ```
 
-# Misc
+## Misc
 
 It might be useful to disable overlayfs metacopy for the conffs:
 `echo N | sudo tee /sys/module/overlay/parameters/metacopy`
