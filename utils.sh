@@ -81,7 +81,10 @@ function bootstrap_fs() {
     echo "" > /etc/fstab;
     export DEBIAN_FRONTEND=noninteractive
     sed -i 's/main$/main contrib non-free/' /etc/apt/sources.list;
+    cat /etc/apt/sources.list | grep -v '^\s*#' | grep . | sort -u > /tmp/apt_sources; mv /tmp/apt_sources /etc/apt/sources.list;
     echo "Removing grub";
+    export INITRD=No
+    apt-get install -y dracut > /dev/null;
     apt-get remove -y initramfs-tools grub2-common > /dev/null;
     echo "Updating and installing some base packages";
     apt-get update > /dev/null;
@@ -89,6 +92,7 @@ function bootstrap_fs() {
     localedef -i en_US -f UTF-8 en_US.UTF-8
     apt-get install -y lsb-release > /dev/null;
     echo "deb http://deb.debian.org/debian $(lsb_release -s -c)-proposed-updates main contrib non-free" >> /etc/apt/sources.list;
+    cat /etc/apt/sources.list | grep -v '^\s*#' | grep . | sort -u > /tmp/apt_sources; mv /tmp/apt_sources /etc/apt/sources.list;
     apt-get update > /dev/null;
     echo "Updating linux kernel and headers";
     apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y linux-image-amd64 linux-headers-amd64 > /dev/null;
@@ -138,6 +142,7 @@ function mount_iso() {
         local part
         part="$(losetup -f)"
         echo "Going to use: $part"
+        command -v xxhsum
         if [[ ! -f "${iso_fullpath}-backup" ]]; then
             cp "${iso_fullpath}" "${iso_fullpath}-backup"
         elif [[ "$(xxhsum "${iso_fullpath}")" != "$(xxhsum "${iso_fullpath}-backup")" ]]; then
