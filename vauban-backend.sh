@@ -111,6 +111,7 @@ function apply_stage() {
         { set -x; trap - ERR;
             docker build \
                 --build-arg SOURCE="${local_source_name}" \
+                --build-arg PLAYBOOK="${local_pb}" \
                 --build-arg HOST_NAME="$host" \
                 --build-arg IN_CONFFS="$in_conffs" \
                 --no-cache \
@@ -128,21 +129,30 @@ function apply_stage() {
     wait_pids "pids_prepare_stage" "hosts_built" "prepare stage"
 
     cd ansible/${ANSIBLE_ROOT_DIR:-.}
-    eval "$HOOK_PRE_ANSIBLE"
     export ANSIBLE_ANY_ERRORS_FATAL=True
     export ANSIBLE_BECOME_ALLOW_SAME_USER=False
     export ANSIBLE_KEEP_REMOTE_FILES=True
     export ANSIBLE_TIMEOUT=60
     export ANSIBLE_DOCKER_TIMEOUT=60
+
+    echo "Running HOOK_PRE_ANSIBLE"
+    eval "$HOOK_PRE_ANSIBLE"
+    echo "Done with HOOK_PRE_ANSIBLE"
+
+    echo "Running ansible-playbook"
     if eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c community.docker.docker_api -v $ANSIBLE_EXTRA_ARGS; then
         file_to_touch=/tmp/stage-built
     else
         file_to_touch=/tmp/stage-failed
     fi
+    echo "Done with ansible-playbook. Signaling state=$(basename "$file_to_touch")"
     for host in $hosts; do
         docker exec "$host" touch "$file_to_touch"
     done
+
+    echo "Running HOOK_POST_ANSIBLE"
     eval "$HOOK_POST_ANSIBLE"
+    echo "Done with HOOK_POST_ANSIBLE"
 
     echo "Done with ansible for the stage $stage. Waiting for each container to wrap up ..."
     wait_pids "pids_docker_build" "hosts_built" "build stage $stage"
@@ -264,7 +274,7 @@ function export_rootfs() {
         cp -r /toslash/* / && rm -rf /toslash  # This is also to allow us to write things in /etc/hostname or /etc/hosts
     fi
     apt-get clean -y
-    rm -rf root/.ssh/vauban__id_ed25519 root/ansible boot/initrd* /var/lib/apt/lists/* || true
+    rm -rf /root/.ssh/vauban__id_ed25519 /root/ansible /root/.ansible /boot/initrd* /var/lib/apt/lists/* /tmp/* /var/tmp/* || true
 EOF
     put_sshd_keys "$image_name"
     echo "Compressing rootfs"
