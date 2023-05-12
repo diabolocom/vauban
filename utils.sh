@@ -142,7 +142,7 @@ function mount_iso() {
         local part
         part="$(losetup -f)"
         echo "Going to use: $part"
-        command -v xxhsum
+        command -v xxhsum > /dev/null
         if [[ ! -f "${iso_fullpath}-backup" ]]; then
             cp "${iso_fullpath}" "${iso_fullpath}-backup"
         elif [[ "$(xxhsum "${iso_fullpath}")" != "$(xxhsum "${iso_fullpath}-backup")" ]]; then

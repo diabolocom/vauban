@@ -4,6 +4,7 @@ FROM ${SOURCE}
 
 ARG HOST_NAME
 ARG IN_CONFFS
+ARG PLAYBOOK
 
 RUN echo $(grep $(hostname) /etc/hosts | cut -f1) ${HOST_NAME} >> /etc/hosts && \
     echo ${HOST_NAME} > /etc/hostname && \
@@ -28,4 +29,4 @@ RUN echo $(grep $(hostname) /etc/hosts | cut -f1) ${HOST_NAME} >> /etc/hosts && 
       packages: |" >> /packages && \
     apt list --installed | sed -e 's/stable,stable/stable/g' > /tmp/apt-after && \
     diff /tmp/apt-before /tmp/apt-after | grep '^[<>]' | sed 's/</          -/g' | sed 's/>/          +/g' >> /packages && \
-    rm -rf /tmp/stage-built /tmp/stage-ready
+    rm -rf /tmp/stage-built /tmp/stage-ready /root/.ansible /tmp/*
