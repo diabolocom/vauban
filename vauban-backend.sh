@@ -322,6 +322,11 @@ function build_conffs_given_host() {
             echo "Incriminated files:"
             find "$layer_path" -type c
         fi
+        if [[ $overlayfs_args == *"$layer_path"* ]]; then
+            echo "Layer already added. There might be stage misconfiguration/repetion"
+            echo "Layer $layer_path will be ignored."
+            continue
+        fi
         first="no"
         overlayfs_args=":$layer_path$overlayfs_args"
     done
