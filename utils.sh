@@ -102,13 +102,11 @@ function bootstrap_fs() {
     echo "deb http://deb.debian.org/debian $(lsb_release -s -c)-proposed-updates main contrib non-free" >> /etc/apt/sources.list;
     cat /etc/apt/sources.list | grep -v '^\s*#' | grep . | sort -u > /tmp/apt_sources; mv /tmp/apt_sources /etc/apt/sources.list;
     apt-get update > /dev/null;
-    apt-get clean -y;
     echo "Updating linux kernel and headers";
     apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y linux-image-amd64 linux-headers-amd64 > /dev/null;
     # remove old kernel/headers version.
     # List all linux headers/image, get only 'local' (meaning the one installed but not downloadable anymore, aka old kernel version)
     # extract package name and remove
-    dd if=/dev/zero of=/toto bs=100M count=10 status=progress; sync;
     apt-get clean -y;
     apt-get remove -y $(apt list --installed 2>/dev/null | grep -E 'linux-(headers|image)-' | grep local 2>&1 | sed -E 's/\/.+$//g') > /dev/null;
     apt-get autoremove -y;
