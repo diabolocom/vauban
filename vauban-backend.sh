@@ -408,6 +408,12 @@ function chroot_dracut() {
     if [[ "$version" = "10."* ]]; then
         apt-get install -y -o Dpkg::Options::="--force-confold" --force-yes dracut dracut-core dracut-network 2>&1 > /dev/null || true
     else
+        if [[ "$version" = "12."* ]]; then
+            mkdir -p /etc/apt/sources.list.d/
+            cat /etc/apt/sources.list | sed -e 's,bookworm-proposed-updates,bookworm,g' | sed -e 's,non-free$,non-free non-free-firmware,g' > /etc/apt/sources.list.d/debian-12.list
+            apt-get update;
+            apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y firmware-bnx2x isc-dhcp-client
+        fi
         apt-get download dracut-core dracut-network dracut-live dracut-squash
         PATH=/usr/local/sbin:/usr/bin/:/sbin dpkg -i dracut*
         apt-get install -y --fix-broken

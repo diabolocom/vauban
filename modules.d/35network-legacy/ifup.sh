@@ -57,6 +57,7 @@ do_dhcp() {
     # dhclient-script will mark the netif up and generate the online
     # event for nfsroot
     # XXX add -V vendor class and option parsing per kernel
+    echo "Running do_dhcp ($@)" > /dev/kmsg
 
     local _COUNT
     local _timeout
@@ -87,7 +88,7 @@ do_dhcp() {
     fi
 
     while [ "$_COUNT" -lt "$_DHCPRETRY" ]; do
-        info "Starting dhcp for interface $netif"
+        info "Starting dhclient for interface $netif with $@ options"
         dhclient "$@" \
             ${_timeout:+--timeout "$_timeout"} \
             -q \
@@ -96,6 +97,7 @@ do_dhcp() {
             -pf "/tmp/dhclient.${netif}.pid" \
             -lf "/tmp/dhclient.${netif}.lease" \
             "$netif" \
+            && echo "Ran do_dhcp successfully" > /dev/kmsg \
             && return 0
         _COUNT=$((_COUNT + 1))
         [ "$_COUNT" -lt "$_DHCPRETRY" ] && sleep 1
@@ -104,6 +106,7 @@ do_dhcp() {
     # nuke those files since we failed; we might retry dhcp again if it's e.g.
     # `ip=dhcp,dhcp6` and we check for the PID file at the top
     rm -f /tmp/dhclient."$netif".pid /tmp/dhclient."$netif".lease
+    echo "Ran do_dhcp but failed" > /dev/kmsg
     return 1
 }
 
@@ -119,6 +122,7 @@ load_ipv6() {
 }
 
 do_ipv6auto() {
+    echo "Running ipv6auto ipv6" > /dev/kmsg
     local ret
     load_ipv6
     echo 0 > /proc/sys/net/ipv6/conf/"${netif}"/forwarding
@@ -130,6 +134,7 @@ do_ipv6auto() {
 
     [ -n "$hostname" ] && echo "echo $hostname > /proc/sys/kernel/hostname" > "/tmp/net.${netif}.hostname"
 
+    echo "Ran ipv6auto ipv6" > /dev/kmsg
     return "$ret"
 }
 
@@ -478,7 +483,7 @@ for p in $(getargs ip=); do
                 ;;
             dhcp6)
                 load_ipv6
-                if getargbool 0 rd.net.dhcp6.stateless; then
+                if getargbool 0 dblc.dhcp6.stateless; then
                     do_dhcp -6 -S
                 else
                     do_dhcp -6
