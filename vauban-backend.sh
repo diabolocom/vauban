@@ -322,13 +322,16 @@ function build_conffs_given_host() {
             echo "Incriminated files:"
             find "$layer_path" -type c
         fi
-        if [[ $overlayfs_args == *"$layer_path"* ]]; then
+        layer_path_no_diff="$(dirname "$layer_path")"  # removes the /diff at the end
+        docker_overlay_dir="$(dirname "$layer_path_no_diff")"  # should returns /var/lib/docker/overlay2 by default
+        short_layer_path="$docker_overlay_dir/l/$(cat $layer_path_no_diff/link)"
+        first="no"
+        if [[ $overlayfs_args == *"$short_layer_path"* ]]; then
             echo "Layer already added. There might be stage misconfiguration/repetion"
             echo "Layer $layer_path will be ignored."
             continue
         fi
-        first="no"
-        overlayfs_args=":$layer_path$overlayfs_args"
+        overlayfs_args=":$short_layer_path$overlayfs_args"
     done
     mkdir -p "overlayfs-${host}/merged" "overlayfs-${host}/upperdir" "overlayfs-${host}/workdir" "overlayfs-${host}/lower" && cd "overlayfs-${host}"
 
