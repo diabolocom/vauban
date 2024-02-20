@@ -71,6 +71,7 @@ RUN apt-get update && \
         gcc-9-base || true ; } && \
     apt-get -y install debconf-utils && \
     echo resolvconf resolvconf/linkify-resolvconf boolean false | debconf-set-selections && \
+    apt-get install -y linux-headers-amd64 linux-image-amd64 && \
     apt-get autoremove -y && \
     apt-get clean
 

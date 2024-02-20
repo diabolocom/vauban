@@ -24,12 +24,16 @@ function cleanup() {
     fi
 
     umount linux-build/merged > /dev/null 2> /dev/null || true
-    umount "iso-$_arg_iso" > /dev/null 2> /dev/null || true
+    umount_rbind "overlay-$_arg_iso" > /dev/null 2> /dev/null || true
+    umount "overlay-$_arg_iso" > /dev/null 2> /dev/null || true
     umount "fs-$_arg_iso" > /dev/null 2> /dev/null || true
+    umount "iso-$_arg_iso" > /dev/null 2> /dev/null || true
+    rm -rf "overlay-$_arg_iso" "fs-$_arg_iso" "iso-$_arg_iso" "upperdir-$_arg_iso" "workdir-$_arg_iso" > /dev/null 2>&1 || true
     losetup -D > /dev/null 2> /dev/null || true
 }
 
 function catch_err() {
+    if [[ "$VAUBAN_SET_FLAGS" = *"x"* ]]; then sleep 30 || true; fi
     kill -10 $$
     exit 0
 }
@@ -44,7 +48,7 @@ function end() {
 }
 
 function get_os_name() {
-    name=$(chroot "fs-$_arg_iso" bin/bash <<EOF
+    name=$(chroot "overlay-$_arg_iso" bin/bash <<EOF
     name="\$(/usr/bin/lsb_release -i | cut -d$'\t' -f2 | tr '[:upper:]' '[:lower:]')"
     if [[ -f /etc/debian_version ]]; then
         version="\$(cat /etc/debian_version)"
@@ -58,7 +62,7 @@ EOF
 }
 
 function find_kernel() {
-    find "fs-$_arg_iso" -type f -name 'vmlinuz*' | sort | tail -n 1
+    find "overlay-$_arg_iso" -type f -name 'vmlinuz*' | sort | tail -n 1
 }
 
 function get_kernel_version() {
@@ -75,7 +79,10 @@ function get_rootfs_kernel_version() {
 
 function bootstrap_fs() {
     # We need some DNS to install the packages needed to generate the initramfs
-    chroot "fs-$_arg_iso" bin/bash <<- "EOF"
+    mount_rbind "overlay-$_arg_iso"
+
+    chroot "overlay-$_arg_iso" bin/bash <<- "EOF"
+    set -e;
     rm -f /etc/resolv.conf;
     echo nameserver 8.8.8.8 > /etc/resolv.conf;
     echo "" > /etc/fstab;
@@ -84,6 +91,7 @@ function bootstrap_fs() {
     cat /etc/apt/sources.list | grep -v '^\s*#' | grep . | sort -u > /tmp/apt_sources; mv /tmp/apt_sources /etc/apt/sources.list;
     echo "Removing grub";
     export INITRD=No
+    apt-get update;
     apt-get install -y dracut > /dev/null;
     apt-get remove -y initramfs-tools grub2-common > /dev/null;
     echo "Updating and installing some base packages";
@@ -94,14 +102,18 @@ function bootstrap_fs() {
     echo "deb http://deb.debian.org/debian $(lsb_release -s -c)-proposed-updates main contrib non-free" >> /etc/apt/sources.list;
     cat /etc/apt/sources.list | grep -v '^\s*#' | grep . | sort -u > /tmp/apt_sources; mv /tmp/apt_sources /etc/apt/sources.list;
     apt-get update > /dev/null;
+    apt-get clean -y;
     echo "Updating linux kernel and headers";
     apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y linux-image-amd64 linux-headers-amd64 > /dev/null;
     # remove old kernel/headers version.
     # List all linux headers/image, get only 'local' (meaning the one installed but not downloadable anymore, aka old kernel version)
     # extract package name and remove
+    dd if=/dev/zero of=/toto bs=100M count=10 status=progress; sync;
+    apt-get clean -y;
     apt-get remove -y $(apt list --installed 2>/dev/null | grep -E 'linux-(headers|image)-' | grep local 2>&1 | sed -E 's/\/.+$//g') > /dev/null;
     apt-get autoremove -y;
 EOF
+    umount_rbind "overlay-$_arg_iso"
 }
 
 function prepare_fs() {
@@ -111,10 +123,29 @@ function prepare_fs() {
     if [[ -n "$fs" ]]; then
         rmdir "fs-$_arg_iso" && unsquashfs -d "fs-$_arg_iso" "$fs"
     fi
+    mount -t overlay overlay -o rw,lowerdir="fs-$_arg_iso",workdir="workdir-$_arg_iso",upperdir="upperdir-$_arg_iso" "overlay-$_arg_iso"
     bootstrap_fs
 }
 
 prepared="false"
+
+function mount_rbind() {
+    cd "$1"
+    mkdir -p proc sys dev
+    mount -t proc /proc proc/
+    mount --rbind /sys sys/
+    mount --rbind /dev dev/
+    mount --make-rslave sys/
+    mount --make-rslave dev/
+    cd ..
+}
+
+function umount_rbind() {
+    echo "Unmounting directories"
+    umount -R "$1"/proc
+    umount -R "$1"/sys
+    umount -R "$1"/dev
+}
 
 function ensure_devtmpfs() {
     [[ "$(mount | grep /dev | grep devtmpfs)" ]] || mount -t devtmpfs devtmpfs /dev
@@ -124,13 +155,13 @@ function mount_iso() {
     if [[ "$prepared" == "true" ]]; then
         return
     fi
-
     if [[ -d "iso-$_arg_iso" ]]; then
         umount "iso-$_arg_iso" > /dev/null 2>&1 || true
         umount "fs-$_arg_iso" > /dev/null 2>&1 || true
-        rm -rf "iso-$_arg_iso" "fs-$_arg_iso"
+        umount "overlay-$_arg_iso" > /dev/null 2>&1 || true
+        rm -rf "iso-$_arg_iso" "fs-$_arg_iso" "overlay-$_arg_iso" "upperdir-$_arg_iso" "workdir-$_arg_iso"
     fi
-    mkdir "iso-$_arg_iso" "fs-$_arg_iso" -p
+    mkdir "iso-$_arg_iso" "fs-$_arg_iso" "overlay-$_arg_iso" "upperdir-$_arg_iso" "workdir-$_arg_iso" -p
     local type
     file_mime="$(file $iso_fullpath --mime-type -b)"
     file_basic="$(file $iso_fullpath -b)"
@@ -142,14 +173,9 @@ function mount_iso() {
         local part
         part="$(losetup -f)"
         echo "Going to use: $part"
-        command -v xxhsum > /dev/null
-        if [[ ! -f "${iso_fullpath}-backup" ]]; then
-            cp "${iso_fullpath}" "${iso_fullpath}-backup"
-        elif [[ "$(xxhsum "${iso_fullpath}")" != "$(xxhsum "${iso_fullpath}-backup")" ]]; then
-            cp "${iso_fullpath}-backup" "${iso_fullpath}"
-        fi
+
         losetup -f -P "$iso_fullpath"
-        mount -o loop -t ext4 "${part}p1" "./fs-$_arg_iso"
+        mount -o loop,ro -t ext4 "${part}p1" "./fs-$_arg_iso"
     fi
     prepare_fs
     prepared="true"
@@ -356,7 +382,7 @@ function add_section_to_recap() {
 function print_recap() {
     set "+x"
 
-    cat "$recap_file"
+    cat "$recap_file" || true
 
     set "-$VAUBAN_SET_FLAGS"
 }

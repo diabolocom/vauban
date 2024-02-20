@@ -20,11 +20,26 @@ configuration:
 # Protected names for masters: "name", "stages", "conffs"
 
 "debian-11-generic-amd64.raw":
+  url: https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.raw
+  sha512sums: https://cloud.debian.org/images/cloud/bullseye/latest/SHA512SUMS
   name: debian-11/iso
   master-11-example:
     stages:
       - playbook.yml
     master-11-example-2:
+      stages:
+        - playbook2.yml
+      branch: example
+      conffs: "backend*"
+
+"debian-12-generic-amd64.raw":
+  url: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.raw
+  sha512sums: https://cloud.debian.org/images/cloud/bookworm/latest/SHA512SUMS
+  name: debian-12/iso
+  master-12-example:
+    stages:
+      - playbook.yml
+    master-12-sub-example:
       stages:
         - playbook2.yml
       branch: example

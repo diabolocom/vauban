@@ -11,12 +11,13 @@ import sys
 import os
 import subprocess
 import traceback
+import hashlib
 import json
 from copy import deepcopy
 from dataclasses import dataclass
 
 # Import external module and print an nice error message if module is not found
-for module, module_name in [('yaml', 'pyyaml'), ('click', 'click')]:
+for module, module_name in [('yaml', 'pyyaml'), ('click', 'click'), ('requests', 'requests')]:
     try:
         globals()[module] = __import__(module)
     except ModuleNotFoundError :
@@ -132,6 +133,7 @@ class VaubanMaster:
     """
     Represent a vauban master, with its configuration, a link to its parent, and to its children
     """
+    iso_updated = False
 
     def __init__(
         self,
@@ -153,6 +155,13 @@ class VaubanMaster:
         self.iso: str = name if self.is_iso else parent.iso
         self.name = value.get('name', name)
         self.configuration: VaubanConfiguration = configuration
+        if parent is None:
+            self.url = value.get("url", None)
+            self.sha512sums = value.get('sha512sums', None)
+        else:
+            self.url = parent.url
+            self.sha512sums = parent.sha512sums
+        assert (self.url is None and self.sha512sums is None) or (self.url is not None and self.sha512sums is not None)  # Make sure that if url is defined, sha512sums is as well
         for k, v in value.items():
             if isinstance(v, dict):
                 self.children.append(VaubanMaster(k, v, self.configuration, self))
@@ -184,6 +193,59 @@ class VaubanMaster:
             r += c.list_masters()
         return r
 
+    def _print_build_stage_header(self, stage):
+        outer_len = int((53 - len(max(STAGES))) / 2 - 1)
+        center_len = len(max(STAGES))
+        print()
+        print("=" * 53)
+        print(f"{'.' * outer_len} {stage:^{center_len}} {'.' * outer_len}")
+        print("=" * 53)
+        print()
+
+    @staticmethod
+    def download_to_file(url, path):
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(path, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        return path
+
+    @staticmethod
+    def sha512sum(file):
+        BUF_SIZE = 65536
+        sha512 = hashlib.sha512()
+        with open(file, 'rb') as f:
+            while True:
+                data = f.read(BUF_SIZE)
+                if not data:
+                    break
+                sha512.update(data)
+        return sha512.hexdigest()
+
+    def get_iso(self, check):
+        iso_dir = "/srv/iso/" if os.path.isdir("/srv/iso") else "./"
+        iso_path = iso_dir + self.iso  # Not using iso_name defined below because the remote name may not be the one we want locally
+        if not self.iso_updated and self.url is not None and not check:
+            iso_name = self.url.split('/')[-1]
+            sha512sums_file = requests.get(self.sha512sums).text.splitlines()
+            sha512_original = None
+            for line in sha512sums_file:
+                if iso_name in line:
+                    sha512_original = line[:128]
+                    break
+            assert sha512_original is not None
+
+            if not os.path.isfile(iso_path) or VaubanMaster.sha512sum(iso_path) != sha512_original:
+                print(f"Downloading {self.url} to {iso_path}")
+                VaubanMaster.download_to_file(self.url, iso_path)
+            assert VaubanMaster.sha512sum(iso_path) == sha512_original
+            self.iso_updated = True
+
+        if not os.path.isfile(iso_path) and not check:
+            raise Exception("ISO file not found")
+        return iso_path
+
     def _build_stage(self, cc):
         """
         Internal build function. Actually performs the build if not in debug
@@ -197,12 +259,7 @@ class VaubanMaster:
         else:
             branch = cc.branch
 
-        if os.path.isfile(f"/srv/iso/{self.iso}"):
-            iso_path = f"/srv/iso/{self.iso}"
-        elif os.path.isfile(self.iso):
-            iso_path = f"{self.iso}"
-        else:
-            raise Exception("ISO file not found")
+        iso_path = self.get_iso(cc.check)
 
         vauban_cli = [
             "./vauban.sh",

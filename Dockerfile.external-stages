@@ -23,7 +23,8 @@ RUN echo $(grep $(hostname) /etc/hosts | cut -f1) ${HOST_NAME} >> /etc/hosts && 
         apt-get install -y linux-headers-amd64 linux-image-amd64 && \
         apt-get autoremove -y && \
         apt-get purge -y $(apt list --installed 2> /dev/null | grep linux-head | grep -v linux-headers-amd64/ | head -n-2 | cut -f1 -d'/') && \
-        apt-get purge -y $(apt list --installed 2> /dev/null | grep linux-image | grep -v linux-image-amd64/ | head -n-1 | cut -f1 -d'/') ; \
+        apt-get purge -y $(apt list --installed 2> /dev/null | grep linux-image | grep -v linux-image-amd64/ | head -n-1 | cut -f1 -d'/') && \
+        apt list --installed 2> /dev/null | grep -E 'linux-(header|image)' | cut -d/ -f1 | xargs apt-mark hold ; \
     fi && \
     echo "\n\
     - playbook: ${PLAYBOOK}\n\

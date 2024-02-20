@@ -8,7 +8,7 @@ function docker_import() {
     local name
     name="$1"
     echo "Creating $name/raw-iso"
-    tar -C "fs-$_arg_iso" -c . | docker import - "$name/raw-iso"
+    tar -C "overlay-$_arg_iso" -c . | docker import - "$name/raw-iso"
 }
 
 function prepare_stage_for_host() {
@@ -396,18 +396,11 @@ function chroot_dracut() {
     echo "Preparing to chroot to generate the initramfs with dracut"
 
     echo "Mounting directories"
-    cd "fs-$_arg_iso"
-    mkdir -p proc sys dev
-    mount -t proc /proc proc/
-    mount --rbind /sys sys/
-    mount --rbind /dev dev/
-    mount --make-rslave sys/
-    mount --make-rslave dev/
-    cd ..
+    mount_rbind "overlay-$_arg_iso"
 
-    cp dracut.conf "fs-$_arg_iso/"
+    cp dracut.conf "overlay-$_arg_iso/"
     echo "Installing dracut in chroot"
-    chroot "fs-$_arg_iso" bin/bash << "EOF"
+    chroot "overlay-$_arg_iso" bin/bash << "EOF"
     export DEBIAN_FRONTEND=noninteractive
     apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y openssh-server firmware-bnx2x
     cd tmp
@@ -421,23 +414,20 @@ function chroot_dracut() {
     fi
     version="$(cat /etc/debian_version)"
 EOF
-    chroot "fs-$_arg_iso" bin/bash << EOF
-    [[ ! -d /fs-$_arg_iso ]] && ln -s / /fs-$_arg_iso
+    chroot "overlay-$_arg_iso" bin/bash << EOF
+    [[ ! -d /overlay-$_arg_iso ]] && ln -s / /overlay-$_arg_iso
 EOF
-    put_sshd_keys "$name" "fs-$_arg_iso/"
-    cp -r modules.d/* "fs-$_arg_iso/usr/lib/dracut/modules.d/"
+    put_sshd_keys "$name" "overlay-$_arg_iso/"
+    cp -r modules.d/* "overlay-$_arg_iso/usr/lib/dracut/modules.d/"
 
     echo "Running dracut in chrooted environment"
 
-    chroot "fs-$_arg_iso" bin/bash << EOF
+    chroot "overlay-$_arg_iso" bin/bash << EOF
     dracut -N --conf dracut.conf -f -k "$modules" initramfs.img $kernel_version 2>&1 > /dev/null;
-    rm /fs-$_arg_iso;
+    rm /overlay-$_arg_iso;
 EOF
 
-    echo "Unmounting directories"
-    umount -R "fs-$_arg_iso"/proc
-    umount -R "fs-$_arg_iso"/sys
-    umount -R "fs-$_arg_iso"/dev
+    umount_rbind "overlay-$_arg_iso"
 }
 
 function build_initramfs() {
@@ -452,13 +442,13 @@ function build_initramfs() {
 
     cp "$kernel" ./vmlinuz-default
 
-    modules="fs-$_arg_iso/usr/lib/modules/$kernel_version"
+    modules="overlay-$_arg_iso/usr/lib/modules/$kernel_version"
     if [ ! -d "$modules" ]; then
         printf "%s does not exist. Cannot find kernel modules for version %s" "$modules" "$kernel_version"
         exit 1
     fi
     chroot_dracut "$name" "$modules" "$kernel_version"
-    mv "fs-$_arg_iso/initramfs.img" .
+    mv "overlay-$_arg_iso/initramfs.img" .
 }
 
 function upload() {
@@ -546,7 +536,7 @@ function build_kernel() {
     mkdir linux-build && cd linux-build
     mkdir upperdir workdir merged && cd ..
 
-    mount -t overlay overlay -o rw,lowerdir="./fs-$_arg_iso",workdir=./linux-build/workdir,upperdir=./linux-build/upperdir linux-build/merged
+    mount -t overlay overlay -o rw,lowerdir="./overlay-$_arg_iso",workdir=./linux-build/workdir,upperdir=./linux-build/upperdir linux-build/merged
 
     mkdir -p linux-build/merged/patches
     cp patches/* linux-build/merged/patches/
