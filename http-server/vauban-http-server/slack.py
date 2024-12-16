@@ -6,6 +6,7 @@ from sentry_sdk import capture_exception
 from slack_sdk.errors import SlackApiError
 from jinja2 import Environment, BaseLoader
 from datetime import datetime
+import re
 import json
 from flask import request
 import yaml
@@ -117,6 +118,7 @@ class SlackNotif:
             }
             return progresses[event_type]
 
+        ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
         rtemplate = Environment(loader=BaseLoader).from_string(blocks_tpl)
         context |= {"last update": datetime.now().replace(microsecond=0).isoformat(" ")}
         context |= {
@@ -124,6 +126,9 @@ class SlackNotif:
         }
         if logs_raw is not None:
             logs_raw = html.unescape(logs_raw.replace("\n", "\n" + (" " * 8)))
+            logs_raw = ansi_escape.sub("", logs_raw)
+        elif logs is not None:
+            logs = [ansi_escape.sub("", log) for log in logs]
         values = {
             "job_tracking_msg": get_tracking_msg(event_type, ulid),
             "job_infos": [{"key": k, "value": v} for k, v in infos.items()],
