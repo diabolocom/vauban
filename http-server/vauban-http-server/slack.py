@@ -144,7 +144,8 @@ class SlackNotif:
         user_creation = request.headers.get("X-authentik-username", "undefined")
         infos |= {"user": user_creation}
         context |= {
-            "creation date": datetime.now().replace(microsecond=0).isoformat(" ")
+            "creation date": datetime.now().replace(microsecond=0).isoformat(" "),
+            "client": request.headers.get("User-Agent", "undefined"),
         }
         try:
             self.client.chat_postMessage(
