@@ -7,12 +7,13 @@ from kubernetes.client.rest import ApiException
 from kubernetes.stream import stream
 from ulid import ULID
 from .kube import get_vauban_job
+from .slack import SlackNotif
 import sentry_sdk
 from sentry_sdk import capture_exception
 from sentry_sdk.integrations.flask import FlaskIntegration
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN", None)
-if SENTRY_DSN:
+if SENTRY_DSN and os.environ.get("SENTRY_DISABLE", "0") != "1":
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         integrations=[
@@ -22,6 +23,8 @@ if SENTRY_DSN:
         ],
         enable_tracing=False,
     )
+else:
+    print("Sentry integration disabled")
 
 
 app = Flask(__name__)
@@ -38,6 +41,7 @@ k8s_client = client.ApiClient()
 core_api_instance = client.CoreV1Api(k8s_client)
 batch_api_instance = client.BatchV1Api(k8s_client)
 namespace = os.environ.get("VAUBAN_NAMESPACE", "vauban")
+slack_notif = SlackNotif()
 
 
 @app.route("/")
@@ -78,13 +82,10 @@ def build():
         )
     ulid = str(ULID())
     try:
-        vauban_cli = [
-            "./vauban.py",
-            "--name",
-            args["name"],
-            "--stage",
-            args["stage"],
-        ]
+        stage = args["stage"]
+        name = args["name"]
+        vauban_cli = ["./vauban.py", "--name", name, "--stage", stage]
+        notif_infos = {"stage": stage, "name": name}
     except KeyError as e:
         return (
             jsonify(
@@ -98,8 +99,10 @@ def build():
     for arg in ("build-parents", "branch", "conffs"):
         if arg in args:
             vauban_cli += [f"--{arg}", args[arg]]
+            notif_infos |= {arg: args[arg]}
     if "extra-args" in args:
         vauban_cli += [args["extra-args"]]
+        notif_infos |= {"extra-args": args["extra-args"]}
     # FIXME make it configurable
     manifest = get_vauban_job(
         ulid,
@@ -115,6 +118,9 @@ def build():
             jsonify({"status": "error", "message": f"Failed to run a new job: {e}\n"}),
             500,
         )
+    slack_notif.create_notification(
+        ulid, notif_infos, {"source": os.environ.get("HOSTNAME", "undefined")}
+    )
     for i in range(100):
         try:
             batch_api_instance.read_namespaced_job(f"vauban-{ulid.lower()}", namespace)
@@ -167,6 +173,16 @@ def _get_logs(ulid):
     return {"logs": log_list[-1], "previous_pods_logs": log_list[:-1]}
 
 
+def get_last_five_log_lines(log_objs):
+    if log_objs is None or log_objs["logs"] is None:
+        return None
+    if log_objs["logs"]["status"] == "error":
+        return []
+    if log_objs["logs"]["status"] == "ok":
+        return log_objs["logs"]["logs"].split("\n")[-5:]
+    raise Exception("Code shouldn't be reached")
+
+
 @app.route("/status/<ulid>")
 def status(ulid):
     try:
@@ -191,8 +207,12 @@ def status(ulid):
         and status.failed > 0
         and status.ready == 0
     ):
+        slack_notif.update_error(
+            ulid, {"status": "failed"}, {}, get_last_five_log_lines(log_objs)
+        )
         return jsonify({"status": "error", "message": "Job failed !"} | log_objs), 500
     if status.active is not None:
+        slack_notif.update_in_progress(ulid, {}, {}, get_last_five_log_lines(log_objs))
         return (
             jsonify(
                 {"status": "in-progress", "message": "Job is currently running"}
@@ -201,11 +221,15 @@ def status(ulid):
             202,
         )
     if status.active is None and status.completion_time is not None:
+        slack_notif.update_done(
+            ulid, {"status": "built"}, {}, get_last_five_log_lines(log_objs)
+        )
         return jsonify(
             {"status": "ok", "message": "Job is done ! Build successful"} | log_objs
         )
 
     capture_exception(Exception(status))
+    slack_notif.update_broken(ulid, {}, {}, get_last_five_log_lines(log_objs))
     return (
         jsonify(
             {"status": "unknown", "message": f"Job in an unknown state: {str(status)}"}
@@ -219,6 +243,9 @@ def delete(ulid):
     try:
         api_response = batch_api_instance.delete_namespaced_job(
             f"vauban-{ulid.lower()}", namespace, propagation_policy="Background"
+        )
+        slack_notif.update_garbage_collected(
+            ulid, {}, {}, get_last_five_log_lines(log_objs)
         )
     except ApiException as e:
         if str(e.status) == "404":

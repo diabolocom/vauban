@@ -139,7 +139,15 @@ def get_pod_kaniko_manifest(name, source, debian_release, tags, in_conffs, uuid)
     pod_kaniko = {
         "apiVersion": "v1",
         "kind": "Pod",
-        "metadata": {"name": name, "labels": {"vauban.corp.dblc.io/uuid": str(uuid)}},
+        "metadata": {
+            "name": name,
+            "labels": {
+                "vauban.corp.dblc.io/uuid": str(uuid),
+                "vauban.corp.dblc.io/vauban-job-id": os.environ.get(
+                    "VAUBAN_BUILD_JOB_ULID", "VAUBAN_BUILD_JOB_ULID_var_undefined"
+                ),
+            },
+        },
         "spec": {
             "containers": [
                 {

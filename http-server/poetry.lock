@@ -618,6 +618,20 @@ files = [
 ]
 
 [[package]]
+name = "slack-sdk"
+version = "3.33.1"
+description = "The Slack API Platform SDK for Python"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "slack_sdk-3.33.1-py2.py3-none-any.whl", hash = "sha256:ef93beec3ce9c8f64da02fd487598a05ec4bc9c92ceed58f122dbe632691cbe2"},
+    {file = "slack_sdk-3.33.1.tar.gz", hash = "sha256:e328bb661d95db5f66b993b1d64288ac7c72201a745b4c7cf8848dafb7b74e40"},
+]
+
+[package.extras]
+optional = ["SQLAlchemy (>=1.4,<3)", "aiodns (>1.0)", "aiohttp (>=3.7.3,<4)", "boto3 (<=2)", "websocket-client (>=1,<2)", "websockets (>=9.1,<14)"]
+
+[[package]]
 name = "urllib3"
 version = "2.2.3"
 description = "HTTP library with thread-safe connection pooling, file post, and more."
@@ -670,4 +684,4 @@ watchdog = ["watchdog (>=2.3)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "425bc86bdea8ffc18189c6d130f09583b29c9f2fcced0e719604a6d56e0f1ea2"
+content-hash = "7f78e4d0fae56940d56e95945cd7a98d0f16e11bb29336fae3f6cc9235435417"

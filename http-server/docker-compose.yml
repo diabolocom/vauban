@@ -8,3 +8,4 @@ services:
       # FIXME to your specific home directory
       # I know it's ugly, I just went for the quick solution at the time
       - /home/zarak/.kube:/home/app/.kube:ro
+    env_file: ".env"
