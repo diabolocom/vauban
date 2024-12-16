@@ -227,8 +227,10 @@ function kubernetes_build_conffs_for_host() {
         --exclude "root/.ansible" \
         . > /dev/null
     conffs_archive_size="$(stat -c%s "conffs-$host.tgz")";
-    if [[ "$conffs_archive_size" > $CONFFS_MAX_SIZE ]]; then
-        echo "The conffs archive size is too big. Must be less than $CONFFS_MAX_SIZE. Actual : $conffs_archive_size"
+    if [[ "$conffs_archive_size" -ge $CONFFS_MAX_SIZE ]]; then
+        conffs_archive_size_readable="$(numfmt --to=iec-i --suffix=B --format="%9.2f" $conffs_archive_size)"
+        conffs_max_archive_size_readable="$(numfmt --to=iec-i --suffix=B --format="%9.2f" $CONFFS_MAX_SIZE)"
+        echo "The conffs archive size is too big. Must be less than $conffs_max_archive_size_readable. Actual : $conffs_archive_size_readable"
         exit 1;
     fi
     )
