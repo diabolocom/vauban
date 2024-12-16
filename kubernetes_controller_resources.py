@@ -189,6 +189,7 @@ def get_pod_kaniko_manifest(name, source, debian_release, tags, in_conffs, uuid)
                 }
             ],
             "restartPolicy": "Never",
+            "automountServiceAccountToken": False,
             "volumes": [
                 {
                     "name": "dockerfile",
