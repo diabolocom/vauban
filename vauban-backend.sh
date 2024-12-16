@@ -102,6 +102,7 @@ function apply_stage() {
     export ANSIBLE_KEEP_REMOTE_FILES=True
     export ANSIBLE_TIMEOUT=60
     export ANSIBLE_DOCKER_TIMEOUT=60
+    export ANSIBLE_INVENTORY_CACHE_TIMEOUT=10
     if [[ $_arg_build_engine == "docker" ]]; then
         ansible_connection_module="community.docker.docker_api"
     elif [[ $_arg_build_engine == "kubernetes" ]]; then
@@ -112,7 +113,7 @@ function apply_stage() {
 
     vauban_log "   - Running ansible-playbook"
 
-    eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c "$ansible_connection_module" -v -e \''{"in_vauban": True, "in_conffs_build": '\''"$(to_boolean is_conffs)"'\''}'\' $ANSIBLE_EXTRA_ARGS | tee -a "$ansible_recap_file"
+    eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c "$ansible_connection_module" -v -e \''{"in_vauban": True, "in_conffs_build": '\''"$(to_boolean is_conffs)"'\''}'\' $ANSIBLE_EXTRA_ARGS 2>&1 | tee -a "$ansible_recap_file"
 
     eval "$HOOK_POST_ANSIBLE"
 

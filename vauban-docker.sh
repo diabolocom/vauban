@@ -2,7 +2,11 @@
 
 set -eEuo pipefail
 
-function kubernetes_init_build_engine() {
+function docker_init_build_engine() {
+    :
+}
+
+function docker_cleanup_build_engine() {
     :
 }
 

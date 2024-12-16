@@ -2,9 +2,16 @@
 
 # set -eEuo pipefail
 
+VAUBAN_KUBERNETES_UUID="$(uuidgen || echo $BASHPID)"
+SRC_PATH="$(pwd)"
+
 function kubernetes_init_build_engine() {
     export DEBIAN_APT_GET_PROXY="$DEBIAN_APT_GET_PROXY"
     python3 ./kubernetes_controller.py --action init
+}
+
+function kubernetes_cleanup_build_engine() {
+    python3 $SRC_PATH/kubernetes_controller.py --action cleanup --uuid "$VAUBAN_KUBERNETES_UUID"
 }
 
 function kubernetes_prepare_stage_for_host() {
@@ -32,9 +39,9 @@ function kubernetes_prepare_stage_for_host() {
 
     vauban_log "      - Starting Pod for $host"
     if [[ -z "$final_name" ]]; then
-        pod_ip="$(python3 kubernetes_controller.py --action create --name "$host" --source "$REGISTRY/$source" --destination "$REGISTRY/$destination:$current_date" --destination "$REGISTRY/$destination:latest" --conffs "$(to_boolean $in_conffs)" --imginfo "$imginfo_update")"
+        pod_ip="$(python3 kubernetes_controller.py --action create --name "$host" --source "$REGISTRY/$source" --destination "$REGISTRY/$destination:$current_date" --destination "$REGISTRY/$destination:latest" --conffs "$(to_boolean $in_conffs)" --imginfo "$imginfo_update" --uuid "$VAUBAN_KUBERNETES_UUID")"
     else
-        pod_ip="$(python3 kubernetes_controller.py --action create --name "$host" --source "$REGISTRY/$source" --destination "$REGISTRY/$destination:$current_date" --destination "$REGISTRY/$destination:latest" --destination "$REGISTRY/$final_name:latest" --destination "$REGISTRY/$final_name:$current_date" --conffs "$(to_boolean $in_conffs)" --imginfo "$imginfo_update")"
+        pod_ip="$(python3 kubernetes_controller.py --action create --name "$host" --source "$REGISTRY/$source" --destination "$REGISTRY/$destination:$current_date" --destination "$REGISTRY/$destination:latest" --destination "$REGISTRY/$final_name:latest" --destination "$REGISTRY/$final_name:$current_date" --conffs "$(to_boolean $in_conffs)" --imginfo "$imginfo_update" --uuid "$VAUBAN_KUBERNETES_UUID")"
     fi
     vauban_log "      - Pod for $host started successfully"
     echo -e "\n[all]\n$host ansible_host=$pod_ip\n" >> ansible/${ANSIBLE_ROOT_DIR:-.}/inventory
@@ -220,9 +227,9 @@ stages:\n" | base64 -w0)"
     init_build_engine  # FIXME
     vauban_log " - Creating Pod. Will take some time"
     if (( ${#stages} > 0 )); then
-        python3 kubernetes_controller.py --action create --name "$name" --debian-release "$debian_release" --destination "$REGISTRY/debian-$debian_release/iso:$current_date" --destination "$REGISTRY/debian-$debian_release/iso:latest" --conffs "no" --imginfo "$imginfo" > /dev/null
+        python3 kubernetes_controller.py --action create --name "$name" --debian-release "$debian_release" --destination "$REGISTRY/debian-$debian_release/iso:$current_date" --destination "$REGISTRY/debian-$debian_release/iso:latest" --conffs "no" --imginfo "$imginfo" --uuid "$VAUBAN_KUBERNETES_UUID" > /dev/null
     else
-        python3 kubernetes_controller.py --action create --name "$name" --debian-release "$debian_release" --destination "$REGISTRY/debian-$debian_release/iso:$current_date" --destination "$REGISTRY/debian-$debian_release/iso:latest" --destination $REGISTRY/$_arg_name:$current_date --destination $REGISTRY/$_arg_name:latest --conffs "no" --imginfo "$imginfo" > /dev/null
+        python3 kubernetes_controller.py --action create --name "$name" --debian-release "$debian_release" --destination "$REGISTRY/debian-$debian_release/iso:$current_date" --destination "$REGISTRY/debian-$debian_release/iso:latest" --destination $REGISTRY/$_arg_name:$current_date --destination $REGISTRY/$_arg_name:latest --conffs "no" --imginfo "$imginfo" --uuid "$VAUBAN_KUBERNETES_UUID" > /dev/null
     fi
     vauban_log " - Pod created. Waiting for it to finish"
     retry 2 python3 kubernetes_controller.py --name "$name" --action end

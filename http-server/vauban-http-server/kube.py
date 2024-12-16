@@ -35,6 +35,6 @@ spec:
   backoffLimit: 1
 """
     job_manifest = yaml.safe_load(job)
-    command = ["bash", "-c", f"cp /opt/vauban/.secrets.env /srv ; cp /opt/vauban/* /srv ; {' '.join(command)}"]
+    command = ["bash", "-c", f"cp /opt/vauban/.secrets.env /srv ; cp /opt/vauban/ansible_id_ed25519 /srv/ansible-ro ; {' '.join(command)}"]
     job_manifest['spec']['template']['spec']['containers'][0]['command'] = command
     return job_manifest

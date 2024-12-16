@@ -60,6 +60,8 @@ function cleanup() {
 
     # Remove our locks
     find "$BUILD_PATH" "$KUBE_IMAGE_DOWNLOAD_PATH" -maxdepth 2 -type f -name "*.vauban.lock" -exec bash -c '[[ "'$$'" = "$(cat {})" ]] && rm {}' \; 2> /dev/null
+
+    "${_arg_build_engine}"_cleanup_build_engine
 }
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]:-.}" )" &> /dev/null && pwd )
@@ -74,7 +76,7 @@ function stacktrace() {
 
 function send_sentry() {
      # Don't do anything if sentry-cli command doesn't exist
-    if ! command -v sentry-cli &> /dev/null; then
+    if ! command -v sentry-cli > /dev/null; then
         return
     fi
 
@@ -379,10 +381,12 @@ function vauban_log() {
 function print_recap() {
     set "+x"
 
-    echo "================================================="
-    echo "================= RECAP ========================="
-    echo "================================================="
-    echo "recap file: $recap_file"
-    echo ""
-    cat "$recap_file" || true
+    if [[ ${VAUBAN_PRINT_RECAP:-yes} == "yes" ]]; then
+        echo "================================================="
+        echo "================= RECAP ========================="
+        echo "================================================="
+        echo "recap file: $recap_file"
+        echo ""
+        cat "$recap_file" || true
+    fi
 }

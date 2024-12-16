@@ -120,6 +120,13 @@ def end_pod(name):
     print(logs)
     delete_finished_pod(NS, name)
 
+def cleanup(uuid):
+    ret = api_instance.list_namespaced_pod(namespace=NS)
+    for pod in ret.items:
+        if pod.metadata.labels is not None and "vauban.corp.dblc.io/uuid" in pod.metadata.labels:
+            if pod.metadata.labels["vauban.corp.dblc.io/uuid"] == uuid:
+                api_instance.delete_namespaced_pod(pod.metadata.name, NS, grace_period_seconds=1)
+
 @click.command()
 @click.option(
     "--action",
@@ -170,14 +177,23 @@ def end_pod(name):
     type=str,
     help="The base64 encoded imginfo update snippet",
 )
-def main(action, name, source, debian_release, destination, conffs, imginfo):
+@click.option(
+    "--uuid",
+    default=None,
+    show_default=True,
+    type=str,
+    help="A UUID to identify all the pods created to an instance of vauban, to do some cleanup if needed",
+)
+def main(action, name, source, debian_release, destination, conffs, imginfo, uuid):
     match action:
         case "init":
             return create_needed_resources(NS)
         case "create":
-            return create_pod(name, source, debian_release, destination, conffs, imginfo)
+            return create_pod(name, source, debian_release, destination, conffs, imginfo, uuid)
         case "end":
             return end_pod(name)
+        case "cleanup":
+            return cleanup(uuid)
         case _:
             eprint(f"Action not defined: {action}")
 
