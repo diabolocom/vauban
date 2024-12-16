@@ -94,6 +94,10 @@ function end_stage_for_host() {
     echo "Docker container commited and pushed. Success !"
 }
 
+function prepare_stage_for_host() {
+    "${_arg_build_engine}"_prepare_stage_for_host "$@"
+}
+
 function apply_stage() {
     local source_name="$1"
     shift
@@ -123,7 +127,6 @@ function apply_stage() {
         local_pb="$stage"
     fi
 
-    clone_ansible_repo
     (
     cd ansible
     [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/$local_branch)" ]] || git reset "origin/$local_branch" --hard
@@ -138,33 +141,11 @@ function apply_stage() {
             local_prefix="$prefix_name"
             local_source_name="$source_name"
         fi
-        docker image inspect "$local_source_name" > /dev/null 2>&1 || pull_image "$local_source_name"
-
-        # Let's make sure we work on the new container
-        docker container stop "$host" > /dev/null 2>&1 || true
-        docker container rm "$host" > /dev/null 2>&1 && echo "!! removed existing container for $host" || true
-        docker run \
-            --name "$host" \
-            --hostname "$host" \
-            --add-host "$host:127.0.0.1" \
-            --add-host "$host:::1" \
-            --env SOURCE="${local_source_name}" \
-            --env PLAYBOOK="${local_pb}" \
-            --env HOST_NAME="$host" \
-            --env IN_CONFFS="$in_conffs" \
-            --volume "$(pwd)"/docker-entrypoint.sh:/docker-entrypoint.sh \
-            --entrypoint /docker-entrypoint.sh \
-            --user root \
-            --detach \
-            --workdir /root \
-            --tty \
-            --tmpfs /tmp \
-            ${local_source_name}
         hosts_built+=("$host")
-        { set -x; trap send_sentry ERR;
-            trap - SIGUSR1;
-            trap 'previous_command=${this_command:-}; this_command=$BASH_COMMAND' DEBUG;
-            prepare_stage_for_host "$host" "$local_pb" "$local_source_name" "$local_branch"
+        {   # bash shenanigans
+            # set -x; trap send_sentry ERR; trap - SIGUSR1; trap 'previous_command=${this_command:-}; this_command=$BASH_COMMAND' DEBUG;
+
+            prepare_stage_for_host "$host" "$local_pb" "$local_source_name" "$local_branch" "$in_conffs" "$local_prefix/$local_pb"
         } > "$vauban_log_path/vauban-prepare-stage-${vauban_start_time}/${host}.log" 2>&1 &
         pids_prepare_stage+=("$!")
     done
@@ -240,9 +221,13 @@ function apply_stages() {
     local local_source_name=""
     local local_final_name=""
 
-    docker image inspect "$source_name" > /dev/null 2>&1 || pull_image "$source_name"
+    if [[ $_arg_build_engine == "docker" ]]; then
+        docker image inspect "$source_name" > /dev/null 2>&1 || pull_image "$source_name"
+    fi
 
     local iter_source_name="$source_name"
+
+    clone_ansible_repo
 
     echo "Applying stages to build our hosts"
     for stage in $stages; do

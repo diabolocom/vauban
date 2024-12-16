@@ -73,6 +73,8 @@ function send_sentry() {
 }
 
 function catch_err() {
+    set +x
+    trap '' DEBUG
     send_sentry $@
     kill -10 $$
     exit 0
@@ -80,7 +82,7 @@ function catch_err() {
 
 function end() {
     local return_code="${1:-}"
-    set +eE
+    set +xeE
     [[ -z "$(jobs -p)" ]] || kill $(jobs -p)
     cleanup
     print_recap

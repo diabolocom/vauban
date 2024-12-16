@@ -279,6 +279,8 @@ class VaubanMaster:
 
         vauban_cli = [
             "./vauban.sh",
+            "--build-engine",
+            "kubernetes",
             "--iso",
             iso_path,
             "--name",
