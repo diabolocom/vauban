@@ -7,6 +7,7 @@ import time
 import json
 import html
 from datetime import datetime, timedelta
+from http.client import IncompleteRead
 import yaml
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -144,10 +145,8 @@ class SlackNotif:
             logs_raw = html.unescape(logs_raw.replace("\n", "\n" + (" " * 8)))
             logs_raw = ansi_escape.sub("", logs_raw)
         elif logs is not None:
-            logs = [
-                ansi_escape.sub("", log[:75] + ".." if len(log) > 77 else log)
-                for log in logs
-            ]
+            logs = [ansi_escape("", log) for log in logs]
+            logs = [(log[:75] + ".." if len(log) > 77 else log) for log in logs]
         values = {
             "job_tracking_msg": get_tracking_msg(event_type, ulid),
             "job_infos": [{"key": k, "value": v} for k, v in infos.items()],
@@ -235,6 +234,8 @@ class SlackNotif:
                 raise SlackRatelimitedException() from e
             print(e)
             capture_exception(e)
+        except IncompleteRead:
+            pass
         return None, None, None, None
 
     def _update_notification(self, event_type, ulid, infos, context, logs, retry=3):
@@ -273,19 +274,19 @@ class SlackNotif:
                 logs_raw = fifth_block["text"]["text"]
 
         try:
-            try:
-                blocks = self._get_blocks(
-                    event_type,
-                    ulid,
-                    slack_msg_infos,
-                    logs,
-                    slack_msg_context,
-                    slack_msg_event_type,
-                    logs_raw,
-                )
-            except Exception as e:
-                capture_exception(e)
-                return None
+            blocks = self._get_blocks(
+                event_type,
+                ulid,
+                slack_msg_infos,
+                logs,
+                slack_msg_context,
+                slack_msg_event_type,
+                logs_raw,
+            )
+        except Exception as e:
+            capture_exception(e)
+            return None
+        try:
             self.client.chat_update(
                 text=f"New Vauban job created: {ulid}",
                 channel=self.channel_id,
@@ -308,6 +309,10 @@ class SlackNotif:
                 },
             )
         except SlackApiError as e:
+            if e.response["error"] == "ratelimited":
+                self.ratelimit_freq -= 1
+                self.ratelimit_timeout = datetime.now() + timedelta(seconds=60)
+                return None
             print(blocks)
             print(e)
             capture_exception(e)
