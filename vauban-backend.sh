@@ -20,14 +20,14 @@ function prepare_stage_for_host() {
     local timeout=600
 
     # Let's make sure we work on the new container
-    $real_docker container stop "$host" > /dev/null 2>&1 || true
-    $real_docker container rm "$host" > /dev/null 2>&1 || true
+    docker container stop "$host" > /dev/null 2>&1 || true
+    docker container rm "$host" > /dev/null 2>&1 || true
 
     for i in $(seq 1 $timeout); do
-        for id in $($real_docker ps -q); do
-            if [[ "$(timeout 1 $real_docker exec "$id" cat /tmp/stage-identification 2>/dev/null)" == "$host" ]]; then
+        for id in $(docker ps -q); do
+            if [[ "$(timeout 1 docker exec "$id" cat /tmp/stage-identification 2>/dev/null)" == "$host" ]]; then
                 container_id="$id"
-                if ! $real_docker rename "$container_id" "$host"; then
+                if ! docker rename "$container_id" "$host"; then
                     echo "Failed to rename container $container_id. Aborting"
                     exit 1
                 fi
@@ -58,13 +58,13 @@ function prepare_stage_for_host() {
       git-sha1: ${ansible_sha1}\n\
       git-branch: ${branch}\n\
       vauban-sha1: ${vauban_sha1}\n" | base64 -w0)"
-    timeout 1 $real_docker exec "$id" bash -c "echo -e $imginfo_update | base64 -d >> /imginfo"
+    retry 3 timeout 2 docker exec "$id" bash -c "echo -e $imginfo_update | base64 -d >> /imginfo"
     echo -e "\n[all]\n$host\n" >> ansible/${ANSIBLE_ROOT_DIR:-.}/inventory
 
     # This takes time
 
     for i in $(seq 1 $timeout); do
-        if [[ "$(timeout 1 $real_docker exec "$id" cat /tmp/stage-ready 2>/dev/null)" == "$host" ]]; then
+        if [[ "$(timeout 1 docker exec "$id" cat /tmp/stage-ready 2>/dev/null)" == "$host" ]]; then
             echo "Our container is ready. Let's signal it that we are ready to pursue as well."
             break
         fi
@@ -75,7 +75,7 @@ function prepare_stage_for_host() {
         sleep 0.5
     done
 
-    timeout 1 $real_docker exec "$id" touch /tmp/stage-begin
+    retry 3 timeout 1 docker exec "$id" touch /tmp/stage-begin
     exit 0
 }
 
@@ -108,9 +108,10 @@ function apply_stage() {
     fi
 
     clone_ansible_repo
+    (
     cd ansible
     [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/$local_branch)" ]] || git reset "origin/$local_branch" --hard
-    cd ..
+    )
 
     echo "Applying stage $stage to $source_name (playbook $local_pb from branch $local_branch) on $hosts"
     for host in $hosts; do
@@ -133,6 +134,7 @@ function apply_stage() {
                 --no-cache \
                 -t "${local_prefix}/${local_pb}" \
                 -f Dockerfile.external-stages .
+            docker_push "${local_prefix}/${local_pb}"
         } > "$vauban_log_path/vauban-docker-build-${vauban_start_time}/${host}.log" 2>&1 &
         pids_docker_build+=("$!")
         hosts_built+=("$host")
@@ -146,6 +148,7 @@ function apply_stage() {
 
     wait_pids "pids_prepare_stage" "hosts_built" "prepare stage"
 
+    local current_dir="$(pwd)"
     cd ansible/${ANSIBLE_ROOT_DIR:-.}
     export ANSIBLE_ANY_ERRORS_FATAL=True
     export ANSIBLE_BECOME_ALLOW_SAME_USER=False
@@ -166,7 +169,7 @@ function apply_stage() {
     tail -n 50 $ansible_recap_file >> $recap_file
     echo "Done with ansible-playbook. Signaling state=$(basename "$file_to_touch")"
     for host in $hosts; do
-        $real_docker exec "$host" touch "$file_to_touch"
+        retry 3 timeout 1 docker exec "$host" touch "$file_to_touch"
     done
 
     echo "Running HOOK_POST_ANSIBLE"
@@ -177,7 +180,7 @@ function apply_stage() {
     wait_pids "pids_docker_build" "hosts_built" "build stage $stage"
     wait
     echo "All build-containers exited"
-    cd - > /dev/null
+    cd "$current_dir"
 }
 
 function apply_stages() {
@@ -228,6 +231,7 @@ function apply_stages() {
         fi
         echo "Tagging $local_final_name on $local_source_name"
         docker tag "$local_source_name" "$local_final_name" > /dev/null 2>&1
+        docker_push "$local_final_name"
     done
 }
 
@@ -242,6 +246,7 @@ function import_iso() {
         --no-cache \
         -t "${name}/iso" \
         -f Dockerfile.external-base .
+    docker_push "$name"/iso
 }
 
 function put_sshd_keys() {
@@ -252,6 +257,7 @@ function put_sshd_keys() {
 
     echo "Putting sshd keys for $host"
 
+    (
     cd vault
     if [[ ! -f "$host".tar.gpg ]]; then
         echo "Generating SSH keys for $host"
@@ -273,7 +279,7 @@ function put_sshd_keys() {
         echo "$VAULTED_SSHD_KEYS_KEY" | gpg -c --no-symkey-cache --pinentry-mode loopback --passphrase-fd 0 "$host.tar" # > "$host.tar.gpg"
     fi
     rm -rf "$host" "$host.tar"
-    cd ..
+    )
 }
 
 function export_rootfs() {
@@ -282,13 +288,15 @@ function export_rootfs() {
     rm -rf tmp && mkdir tmp
     echo "Creating rootfs from $image_name"
     docker create --name $$ "$image_name" --entrypoint bash
+    (
     cd tmp && docker export $$ | tar x
     docker rm $$
-    cd ..
+    )
     chroot "tmp" bin/bash << "EOF"
+    (
     cd etc
     ln -sfr /run/resolvconf/resolv.conf resolv.conf  # We must do that here because docker mounts resolv.conf
-    cd ..
+    )
     if [[ -d /toslash ]]; then
         cp -r /toslash/* / && rm -rf /toslash  # This is also to allow us to write things in /etc/hostname or /etc/hosts
     fi
@@ -326,6 +334,7 @@ function build_conffs_given_host() {
     local prefix_name="$3"
 
     printf "Building conffs for host=%s\n" "$host"
+    local current_dir="$(pwd)"
     mkdir -p overlayfs && cd overlayfs
     overlayfs_args=""
     first="yes"
@@ -360,13 +369,15 @@ function build_conffs_given_host() {
         echo "WARNING: Creating some empty conffs !"
     fi
     rm -rf "conffs-$host.tgz"
-    cd ../..
+    cd "$current_dir"
     put_sshd_keys "$host" "overlayfs/overlayfs-$host/merged"
+    (
     cd "overlayfs/overlayfs-${host}"
+    (
     cd merged
     if [[ -d toslash ]]; then cp -r toslash/* . && rm -rf toslash; fi
     rm -rf var/lib/apt/lists/*
-    cd ..
+    )
     # There is a bug in old version of overlayfs where whiteout are not well understood and
     # are kept as buggy char devices on the merged dir. Touching the file and removing
     # it fixes this
@@ -380,7 +391,7 @@ function build_conffs_given_host() {
     if [[ -n "$overlayfs_args" ]]; then
         umount merged
     fi
-    cd ../..
+    )
 }
 
 function build_conffs() {
@@ -530,8 +541,11 @@ function build_kernel() {
     mount_iso
     umount linux-build || true
     rm -rf linux-build
-    mkdir linux-build && cd linux-build
-    mkdir upperdir workdir merged && cd ..
+    mkdir linux-build
+    (
+    cd linux-build
+    mkdir upperdir workdir merged
+    )
 
     mount -t overlay overlay -o rw,lowerdir="./overlay-$_arg_iso",workdir=./linux-build/workdir,upperdir=./linux-build/upperdir linux-build/merged
 

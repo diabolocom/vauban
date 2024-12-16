@@ -14,13 +14,14 @@ function cleanup() {
     # Keep the conffs that were built (in case it's needed), but move them
     # so that they won't be sent again to dhcp servers on upload
     if [[ -d overlayfs ]]; then
+        (
         cd overlayfs
         shopt -s nullglob
         local iso8601="$(date --iso-8601=seconds)"
         for dir in overlayfs-*; do
             mv "$dir" "$iso8601-$dir"
         done
-        cd ..
+        )
     fi
 
     umount linux-build/merged > /dev/null 2> /dev/null || true
@@ -33,17 +34,18 @@ function cleanup() {
 }
 
 function stacktrace {
-   local i=1 line file func
-   while read -r line func file < <(caller $i); do
-      echo "[$i] $file:$line $func(): $(sed -n "${line}"p "$file")"
-      ((i++))
-   done
+    cd "$(dirname "${BASH_SOURCE:-.}")"
+    local i=1 line file func
+    while read -r line func file < <(caller $i); do
+        echo "[$i] $file:$line $func(): $(sed -n "${line}"p "$file")"
+        ((i++))
+    done
 }
 
 function send_sentry() {
     triggered_cmd="$previous_command"
     UPLOAD_CI_SSH_KEY=*** UPLOAD_CREDS=*** VAULTED_SSHD_KEYS_KEY=*** REGISTRY_PASSWORD=*** sentry-cli send-event \
-        -m "'$triggered_cmd': return code $1 on line $2" \
+        -m "'$triggered_cmd': return code ${1:-} on line ${2:-}" \
         -t conffs:"${_arg_conffs:-}" \
         -t rootfs:"${_arg_rootfs:-}" \
         -t name:"${_arg_name:-}" \
@@ -156,6 +158,7 @@ function prepare_fs() {
 prepared="false"
 
 function mount_rbind() {
+    (
     cd "$1"
     mkdir -p proc sys dev
     mount -t proc /proc proc/
@@ -163,7 +166,7 @@ function mount_rbind() {
     mount --rbind /dev dev/
     mount --make-rslave sys/
     mount --make-rslave dev/
-    cd ..
+    )
 }
 
 function umount_rbind() {
@@ -212,16 +215,18 @@ function clone_ansible_repo() {
     if [[ ! -d ansible ]]; then
         git clone "$ANSIBLE_REPO" ansible
     fi
+    (
     cd ansible
     git config --global --add safe.directory "$(pwd)"
     git fetch
-    cd ..
+    )
 }
 
 function get_conffs_hosts() {
     # Use this function to determine a list of hosts matching the --ansible-hosts vauban CLI argument
     # It uses ansible to resolve the ansible-specific syntax
     clone_ansible_repo
+    local current_dir="$(pwd)"
     cd ansible && git reset "origin/$_arg_branch" --hard
     cd ${ANSIBLE_ROOT_DIR:-.}
     hook_pre_ansible() { eval "$HOOK_PRE_ANSIBLE" ; } && hook_pre_ansible
@@ -232,8 +237,8 @@ function get_conffs_hosts() {
         echo "Couldn't find any matching host in ansible inventory. If the name
 provided is correct, maybe there's an error in function get_conffs_hosts"
     fi
-    cd - > /dev/null && cd ..
     add_to_recap conffs_hosts "Building for:$NEWLINE$hosts"
+    cd "$current_dir"
 }
 
 function wait_pids() {
@@ -289,58 +294,40 @@ EOF
 }
 
 docker_loggedin="$(grep \"$REGISTRY_HOSTNAME\" ~/.docker/config.json 2> /dev/null > /dev/null || echo false)"
-real_docker="$(which docker)"
 current_date="$(date -u +%FT%H%M)"
-function docker() {
-    # A wrapper to login automatically and interact with the registry for us
+function docker_login() {
     if [[ $docker_loggedin = "false" ]]; then
         docker_loggedin="true"
         if [[ -z "$REGISTRY_PASSWORD" ]]; then
             echo no REGISTRY_PASSWORD variable found, and not currently logged in to the docker registry.
             exit 1
         fi
-        echo "$REGISTRY_PASSWORD" | $real_docker login "$REGISTRY_HOSTNAME" --username "$REGISTRY_USERNAME" --password-stdin
+        echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY_HOSTNAME" --username "$REGISTRY_USERNAME" --password-stdin
     fi
+}
+docker_login
 
-    if [[ "$1" == "push" ]]; then
-        $real_docker "$@" || \
-            $real_docker "$@"
-    else
-        $real_docker "$@"
-    fi
-    local ret="$?"
+function retry() {
+    local n="$1"
+    shift
+    for i in $(seq 1 "$n"); do
+        if (( i >= n )); then
+            $@
+        else
+            $@ && break || true
+        fi
+    done
+}
 
-    img_name=""
-    if [[ "$1" = "build" ]]; then
-        next=false
-        for arg in $@; do
-            if [[ "$arg" = "-t" ]]; then
-                next=true
-                continue
-            fi
-            if [[ $next = "true" ]]; then
-                img_name="$arg"
-                break
-            fi
-        done
-    fi
-    if [[ "$1" = "tag" ]]; then
-        # docker tag source destination
-        # $0     $1  $2     $3
-        img_name="$3"
-    fi
-    if [[ -n "$img_name" ]]; then
-        echo "Tagging docker image with $REGISTRY/$img_name and pushing it"
-        $real_docker tag "$img_name" "$REGISTRY/$img_name:$current_date"
-        $real_docker tag "$img_name" "$REGISTRY/$img_name:latest"
-        $real_docker push "$REGISTRY/$img_name:$current_date" || \
-            $real_docker push "$REGISTRY/$img_name:$current_date"
-        $real_docker push "$REGISTRY/$img_name:latest" || \
-            $real_docker push "$REGISTRY/$img_name:latest"
-        echo "Pushed"
+function docker_push() {
+    local img_name="$1"
 
-    fi
-    return "$ret"
+    echo "Tagging docker image with $REGISTRY/$img_name and pushing it"
+    docker tag "$img_name" "$REGISTRY/$img_name:$current_date"
+    docker tag "$img_name" "$REGISTRY/$img_name:latest"
+    retry 3 docker push "$REGISTRY/$img_name:$current_date"
+    retry 3 docker push "$REGISTRY/$img_name:latest"
+    echo "Pushed"
 }
 
 function ssh() {
@@ -364,11 +351,8 @@ function set_deployed() {
     if [[ $image != *"$REGISTRY_HOSTNAME"* ]]; then
         image="$REGISTRY/$image"
     fi
-    "$real_docker" tag "$image:$tag" "$image:deployed"
-    echo "Pushing $image:deployed"
-    docker push "$image:deployed" || \
-        docker push "$image:deployed"
-    echo "Pushed"
+    docker tag "$image:$tag" "$image:deployed"
+    retry 3 docker push "$image:deployed"
 }
 
 if [[ -n ${CI:-} ]]; then
