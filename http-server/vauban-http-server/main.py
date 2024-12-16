@@ -128,10 +128,11 @@ def _get_logs(ulid):
     pods = {}
     if pods_response is not None:
         for pod in pods_response.items:
-            pods[pod.metadata.creation_timestamp] = {
-                "name": pod.metadata.name,
-                "status": pod.status.container_statuses[0].state,
-            }
+            if pod.status.container_statuses is not None:
+                pods[pod.metadata.creation_timestamp] = {
+                    "name": pod.metadata.name,
+                    "status": pod.status.container_statuses[0].state,
+                }
     log_list = []
     for key in sorted(pods.keys()):
         pod = pods[key]
@@ -154,6 +155,9 @@ def status(ulid):
             f"vauban-{ulid.lower()}", namespace
         )
     except ApiException as e:
+        if str(e.status) == "404":
+            return jsonify({"status": "error", "message": "Cannot find such job"}), 404
+        capture_exception(e)
         return (
             jsonify(
                 {"status": "error", "message": f"Error while trying to get jod: {e}"}
