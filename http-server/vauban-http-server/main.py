@@ -1,56 +1,26 @@
-from flask import Flask, session
-from flask import request, jsonify
+"""
+    Main entrypoint for VaubanHTTPServer
+"""
+
 import os
 import time
-from kubernetes import client, config, utils
-from kubernetes.client.rest import ApiException
-from kubernetes.stream import stream
-from ulid import ULID
 from .kube import get_vauban_job
 from .slack import SlackNotif
-import sentry_sdk
+from . import app, batch_api_instance, core_api_instance, namespace
+from flask import request, jsonify
+from kubernetes.client.rest import ApiException
+from ulid import ULID
 from sentry_sdk import capture_exception
-from sentry_sdk.integrations.flask import FlaskIntegration
 
-<<<<<<< HEAD
-SENTRY_DSN = os.environ.get("SENTRY_DSN", None)
-if SENTRY_DSN and os.environ.get("SENTRY_DISABLE", "0") != "1":
-=======
-if os.environ.get("SENTRY_DISABLE", "0") != "1":
->>>>>>> e8ca41a (httpserver: minor fixes in html handling and sentry disab)
-    sentry_sdk.init(
-        dsn=SENTRY_DSN,
-        integrations=[
-            FlaskIntegration(
-                transaction_style="url",
-            ),
-        ],
-        include_local_variables=True,
-        enable_tracing=False,
-    )
-else:
-    print("Sentry integration disabled")
-
-
-app = Flask(__name__)
-
-try:
-    try:
-        config.load_kube_config(config_file="/home/app/.kube/config")
-    except:
-        config.load_kube_config()
-except:
-    config.load_incluster_config()
-
-k8s_client = client.ApiClient()
-core_api_instance = client.CoreV1Api(k8s_client)
-batch_api_instance = client.BatchV1Api(k8s_client)
-namespace = os.environ.get("VAUBAN_NAMESPACE", "vauban")
 slack_notif = SlackNotif()
 
 
 @app.route("/")
-def help():
+def _help():
+    """
+    Return some help
+    """
+
     return """
     Available routes:
         /build
@@ -78,6 +48,9 @@ def help():
 
 @app.route("/build", methods=["POST"])
 def build():
+    """
+    Starts a build job. Returns json
+    """
     try:
         args = request.get_json(force=True)
     except Exception as e:
@@ -125,7 +98,7 @@ def build():
     )
 
     try:
-        api_response = batch_api_instance.create_namespaced_job(namespace, manifest)
+        batch_api_instance.create_namespaced_job(namespace, manifest)
     except ApiException as e:
         capture_exception(e)
         return (
@@ -155,6 +128,9 @@ def build():
 
 
 def _get_logs(ulid):
+    """
+    Get a log object from an ulid, logs coming from one or multiple pods
+    """
     try:
         pods_response = core_api_instance.list_namespaced_pod(
             namespace,
@@ -188,6 +164,9 @@ def _get_logs(ulid):
 
 
 def get_last_n_log_lines(log_objs, n=5):
+    """
+    Filter a log object to return only n lines of logs
+    """
     if log_objs is None or log_objs["logs"] is None:
         return None
     if log_objs["logs"]["status"] == "error":
@@ -198,7 +177,10 @@ def get_last_n_log_lines(log_objs, n=5):
 
 
 @app.route("/status/<ulid>")
-def status(ulid):
+def _status(ulid):
+    """
+    Returns the current status of a build job, and update slack's message
+    """
     try:
         api_response = batch_api_instance.read_namespaced_job(
             f"vauban-{ulid.lower()}", namespace
@@ -275,6 +257,9 @@ def status(ulid):
 
 @app.route("/delete/<ulid>", methods=["DELETE", "POST"])
 def delete(ulid):
+    """
+    Delete a build job and its associated resources
+    """
     try:
         pods_response = core_api_instance.list_namespaced_pod(
             namespace,
@@ -315,9 +300,15 @@ def delete(ulid):
 
 @app.route("/readiness")
 def readiness():
+    """
+    is ready ?
+    """
     return "ok"
 
 
 @app.route("/health")
 def health():
+    """
+    is alive ?
+    """
     return "ok"

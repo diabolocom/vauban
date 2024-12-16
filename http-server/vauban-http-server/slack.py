@@ -11,9 +11,11 @@ from http.client import IncompleteRead
 import yaml
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+import sentry_sdk
 from sentry_sdk import capture_exception, set_context
 from jinja2 import Environment, BaseLoader
 from flask import request
+from . import app
 
 blocks_tpl = """
 - type: header
@@ -67,7 +69,7 @@ ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 class SlackMessageNotFoundException(Exception):
     def __init__(self, ulid):
-        super().__init__(message="Slack message was not found by the given ID")
+        super().__init__("Slack message was not found by the given ID")
         self.ulid = ulid
 
 
@@ -193,7 +195,7 @@ class SlackNotif:
             )
         except SlackApiError as e:
             if e.response["error"] == "invalid_blocks":
-                with sentry_sdk.new_scope() as scope:
+                with sentry_sdk.new_scope():
                     sentry_sdk.capture_exception(e)
             else:
                 print(e)
@@ -236,6 +238,7 @@ class SlackNotif:
             capture_exception(e)
         except IncompleteRead:
             pass
+        app.logger.warning("Nothing found !")
         return None, None, None, None
 
     def _call_and_catch_ratelimit(self, func, retry=3, **kwargs):
@@ -246,6 +249,7 @@ class SlackNotif:
         ):
             self.ratelimit_freq -= 1
             self.ratelimit_timeout = datetime.now() + timedelta(seconds=60)
+            app.logger.info(f"Ratelimit value decreased to {self.ratelimit_freq}")
         try:
             try:
                 return func(**kwargs)
@@ -255,6 +259,7 @@ class SlackNotif:
                 raise
         except SlackRatelimitedException as e:
             self.ratelimit_freq += 1
+            app.logger.warning(f"Ratelimit value increased to {self.ratelimit_freq}")
             self.ratelimit_timeout = datetime.now() + timedelta(seconds=60)
             if retry >= 0:
                 time.sleep(0.5)
@@ -275,7 +280,11 @@ class SlackNotif:
         except SlackRatelimitedException:
             return None
         except Exception as e:
+            app.logger.warning(
+                f"Exception raised while trying to find an existing message: {e}"
+            )
             capture_exception(e)
+            return None
 
         if message is None:
             capture_exception(SlackMessageNotFoundException(ulid))
@@ -305,21 +314,19 @@ class SlackNotif:
             capture_exception(e)
             return None
         try:
-            metadata = (
-                {
-                    "event_type": "vauban_job",
-                    "event_payload": {
-                        "vauban_ulid": ulid,
-                        "vauban_infos": json.dumps(slack_msg_infos),
-                        "vauban_context": json.dumps(slack_msg_context),
-                        "vauban_event_type": (
-                            event_type
-                            if event_type != "update-garbage-collected"
-                            else slack_msg_event_type
-                        ),
-                    },
+            metadata = {
+                "event_type": "vauban_job",
+                "event_payload": {
+                    "vauban_ulid": ulid,
+                    "vauban_infos": json.dumps(slack_msg_infos),
+                    "vauban_context": json.dumps(slack_msg_context),
+                    "vauban_event_type": (
+                        event_type
+                        if event_type != "update-garbage-collected"
+                        else slack_msg_event_type
+                    ),
                 },
-            )
+            }
             self._call_and_catch_ratelimit(
                 self.client.chat_update,
                 retry=retry,
@@ -346,11 +353,15 @@ class SlackNotif:
             and self.ratelimit_freq > 1
         ):
             self.ratelimit_freq -= 1
+            app.logger.warning(f"Ratelimit value decreased to {self.ratelimit_freq}")
             self.ratelimit_timeout = datetime.now() + timedelta(seconds=60)
         if random.randint(1, self.ratelimit_freq) == 1:
             return self._update_notification(
                 "update-in-progress", ulid, infos, context, logs
             )
+        app.logger.warning(
+            f"Event ratelimited. {self.ratelimit_freq=} {self.ratelimit_timeout=}"
+        )
         return None
 
     def update_error(self, ulid, infos, context, logs, lengthy_log_trace=None):
