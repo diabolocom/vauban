@@ -582,4 +582,4 @@ def vauban(**kwargs):
 
 
 if __name__ == "__main__":
-    vauban(auto_envvar_prefix="VAUBAN")
+    vauban()
