@@ -12,3 +12,4 @@ iso-*
 ansible
 linux-build
 vmlinuz*
+venv

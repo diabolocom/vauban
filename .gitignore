@@ -25,6 +25,7 @@ linux-build
 # python
 vauban.egg-info
 __pycache__
+venv
 
 # Deploy files
 github.sh
