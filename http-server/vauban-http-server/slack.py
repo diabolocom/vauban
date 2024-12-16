@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 
-from slack_sdk import WebClient
 import os
-from sentry_sdk import capture_exception, set_context
-from slack_sdk.errors import SlackApiError
-from jinja2 import Environment, BaseLoader
-from datetime import datetime
+import random
 import re
+import time
 import json
-from flask import request
-import yaml
 import html
+from datetime import datetime, timedelta
+import yaml
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
+from sentry_sdk import capture_exception, set_context
+from jinja2 import Environment, BaseLoader
+from flask import request
 
 blocks_tpl = """
 - type: header
@@ -62,6 +64,16 @@ blocks_tpl = """
 ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 
+class SlackMessageNotFoundException(Exception):
+    def __init__(self, ulid):
+        super().__init__(message="Slack message was not found by the given ID")
+        self.ulid = ulid
+
+
+class SlackRatelimitedException(Exception):
+    pass
+
+
 class SlackNotif:
     def _get_channel_id(self):
         if (channel_id := os.environ.get("SLACK_CHANNEL_ID", "")) != "":
@@ -82,6 +94,8 @@ class SlackNotif:
         self.username = os.environ.get("SLACK_USERNAME", "Vauban build manager")
         self.icon_emoji = os.environ.get("SLACK_ICON_EMOJI", ":robot_head:")
         self.channel_id = self._get_channel_id()
+        self.ratelimit_freq = 1
+        self.ratelimit_timeout = None
 
     def _get_blocks(
         self,
@@ -106,7 +120,7 @@ class SlackNotif:
                 case "update-broken":
                     return f"The vauban job went to an unknown state !\\nSome further investigation is required, and modification to VaubanHTTPServer are needed to handle this new case\\”*ULID*: `{ulid}`"
                 case "update-garbage-collected":
-                    return f"The vauban job was garbage collected :recycle:"
+                    return "The vauban job was garbage collected :recycle:"
                 case _:
                     raise NotImplementedError("Should not be reached")
 
@@ -157,6 +171,7 @@ class SlackNotif:
             "creation date": datetime.now().replace(microsecond=0).isoformat(" "),
             "client": request.headers.get("User-Agent", "undefined"),
         }
+        blocks = self._get_blocks("creation", ulid, infos, None, context)
         try:
             self.client.chat_postMessage(
                 text=f"New Vauban job created: {ulid}",
@@ -172,11 +187,11 @@ class SlackNotif:
                 },
                 username=self.username,
                 icon_emoji=self.icon_emoji,
-                blocks=self._get_blocks("creation", ulid, infos, None, context),
+                blocks=blocks,
             )
         except SlackApiError as e:
-            print(blocks)
             print(e)
+            print(blocks)
             capture_exception(e)
 
     def _get_previous_message(self, ulid):
@@ -209,21 +224,35 @@ class SlackNotif:
                         slack_msg_event_type,
                     )
         except SlackApiError as e:
+            if e.response["error"] == "ratelimited":
+                raise SlackRatelimitedException() from e
             print(e)
             capture_exception(e)
         return None, None, None, None
 
-    def _update_notification(self, event_type, ulid, infos, context, logs):
-        message, slack_msg_infos, slack_msg_context, slack_msg_event_type = (
-            self._get_previous_message(ulid)
-        )
-        if message is None:
-            capture_exception(
-                ValueError(
-                    f"Asking to update an event {ulid} but this event was not found"
-                )
+    def _update_notification(self, event_type, ulid, infos, context, logs, retry=3):
+        try:
+            message, slack_msg_infos, slack_msg_context, slack_msg_event_type = (
+                self._get_previous_message(ulid)
             )
-            return
+        except SlackRatelimitedException as e:
+            self.ratelimit_freq += int(retry == 3)
+            self.ratelimit_timeout = datetime.now() + timedelta(seconds=60)
+            if (
+                event_type == "update-in-progress"
+            ):  # We can afford to not update this kind of event, it's not important enough to spam Slack's API
+                return None
+            time.sleep(0.5)
+            if retry >= 0:
+                return self._update_notification(
+                    event_type, ulid, infos, context, logs, retry - 1
+                )
+            capture_exception(e)
+            return None
+
+        if message is None:
+            capture_exception(SlackMessageNotFoundException(ulid))
+            return None
         message_ts = message["ts"]
 
         slack_msg_infos |= infos
@@ -248,7 +277,7 @@ class SlackNotif:
                 )
             except Exception as e:
                 capture_exception(e)
-                return
+                return None
             self.client.chat_update(
                 text=f"New Vauban job created: {ulid}",
                 channel=self.channel_id,
@@ -277,9 +306,14 @@ class SlackNotif:
         return message_ts
 
     def update_in_progress(self, ulid, infos, context, logs):
-        return self._update_notification(
-            "update-in-progress", ulid, infos, context, logs
-        )
+        if datetime.now() > self.ratelimit_timeout and self.ratelimit_freq > 1:
+            self.ratelimit_freq -= 1
+            self.ratelimit_timeout = datetime.now() + timedelta(seconds=60)
+        if random.randint(1, self.ratelimit_freq) == 1:
+            return self._update_notification(
+                "update-in-progress", ulid, infos, context, logs
+            )
+        return None
 
     def update_error(self, ulid, infos, context, logs, lengthy_log_trace=None):
         ts = self._update_notification("update-error", ulid, infos, context, logs)
