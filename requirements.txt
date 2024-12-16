@@ -5,6 +5,7 @@ click==8.1.7
 durationpy==0.9
 google-auth==2.35.0
 idna==3.10
+jmespath==1.0.1
 kubernetes==31.0.0
 oauthlib==3.2.2
 pyasn1==0.6.1
