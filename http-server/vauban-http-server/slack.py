@@ -144,7 +144,10 @@ class SlackNotif:
             logs_raw = html.unescape(logs_raw.replace("\n", "\n" + (" " * 8)))
             logs_raw = ansi_escape.sub("", logs_raw)
         elif logs is not None:
-            logs = [ansi_escape.sub("", log) for log in logs]
+            logs = [
+                ansi_escape.sub("", log[:75] + ".." if len(log) > 77 else log)
+                for log in logs
+            ]
         values = {
             "job_tracking_msg": get_tracking_msg(event_type, ulid),
             "job_infos": [{"key": k, "value": v} for k, v in infos.items()],
@@ -190,9 +193,13 @@ class SlackNotif:
                 blocks=blocks,
             )
         except SlackApiError as e:
-            print(e)
-            print(blocks)
-            capture_exception(e)
+            if e.response["error"] == "invalid_blocks":
+                with sentry_sdk.new_scope() as scope:
+                    sentry_sdk.capture_exception(e)
+            else:
+                print(e)
+                print(blocks)
+                sentry_sdk.capture_exception(e)
 
     def _get_previous_message(self, ulid):
         try:
