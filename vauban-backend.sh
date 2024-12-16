@@ -458,7 +458,6 @@ function build_initramfs() {
 }
 
 function upload() {
-    bootstrap_upload_in_ci
     local master_name
     local upload_list
     local file
@@ -485,52 +484,24 @@ function upload() {
             upload_list="initramfs.img vmlinuz rootfs.tgz overlayfs-*/conffs-*.tgz vmlinuz-default"
         fi;
     fi;
-
-    echo "Will upload resources to distant TFTP/PXE server"
-
-    # Expand upload list
-    # shellcheck disable=SC2086
-    add_to_recap upload "Uploaded: "$upload_list
-    for host in $UPLOAD_HOSTS_LIST; do
-        # Detect if needs to use sudo
-        local opt_sudo=""
-        ssh "$host" touch "$UPLOAD_DIR" || opt_sudo=sudo
-
-        # don't quote opt_sudo to not call empty string if empty
-        ssh "$host" $opt_sudo mkdir -p "$UPLOAD_DIR/$master_name/" "$UPLOAD_DIR/linux/"
-
-
-        for file in $upload_list; do
-            if [[ ! -f "$file" ]]; then add_content_to_recap "Skipping file $file: not found" continue; fi
-            scp "$file" "$host:/tmp"
-            remote_file="$(basename "$file")"
-
-            if [[ "$file" == "vmlinuz" ]] || [[ "$file" == "initramfs.img" ]] || [[ "$file" == "vmlinuz-default" ]]; then
-                if [[ -z "$kernel_version" ]]; then
-                    echo kernel_version not defined and to be used for "$file". Aborting
-                    exit 1
-                fi
-                remote_file="$file-$kernel_version"
-                ssh "$host" $opt_sudo mv "/tmp/$file" "$UPLOAD_DIR/linux/$remote_file"
-                ssh "$host" $opt_sudo chmod 0664 "$UPLOAD_DIR/linux/$remote_file"
-            else
-                if [[ "$file" == "rootfs.tgz" ]] && [[ -n "$kernel_version" ]]; then
-                    ssh "$host" $opt_sudo rm "$UPLOAD_DIR/$master_name/vmlinuz" || true
-                    ssh "$host" $opt_sudo rm "$UPLOAD_DIR/$master_name/vmlinuz-default" || true
-                    ssh "$host" $opt_sudo rm "$UPLOAD_DIR/$master_name/initramfs.img" || true
-                    ssh "$host" $opt_sudo ln -s "../linux/vmlinuz-$kernel_version" "$UPLOAD_DIR/$master_name/vmlinuz"
-                    ssh "$host" $opt_sudo ln -s "../linux/vmlinuz-default-$kernel_version" "$UPLOAD_DIR/$master_name/vmlinuz-default"
-                    ssh "$host" $opt_sudo ln -s "../linux/initramfs.img-$kernel_version" "$UPLOAD_DIR/$master_name/initramfs.img"
-                fi
-                ssh "$host" $opt_sudo mv "/tmp/$remote_file" "$UPLOAD_DIR/$master_name/"
-                ssh "$host" $opt_sudo chmod 0664 "$UPLOAD_DIR/$master_name/$remote_file"
+    must_symlink=0
+    for file in $upload_list; do
+        if [[ "$file" == "vmlinuz" ]] || [[ "$file" == "initramfs.img" ]] || [[ "$file" == "vmlinuz-default" ]]; then
+            if [[ -z "$kernel_version" ]]; then
+                echo kernel_version not defined and to be used for "$file". Aborting
+                exit 1
             fi
-        done
-        if [[ -n $opt_sudo ]]; then
-            ssh "$host" $opt_sudo chown -R "$UPLOAD_OWNER" "$UPLOAD_DIR/$master_name/" "$UPLOAD_DIR/linux/"
-            ssh "$host" $opt_sudo chmod 775 -R "$UPLOAD_DIR/$master_name/" "$UPLOAD_DIR/linux/"
+            remote_file="$file-$kernel_version"
+            curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT"/upload/vauban/linux/"$remote_file" -F "file=@$file" | jq .ok
+            must_symlink=1
+        else
+            remote_file="$(basename "$file")"
+            curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT"/upload/vauban/$master_name/"$remote_file" -F "file=@$file" | jq .ok
         fi
     done
+    if [[ $must_symlink == 1 ]]; then
+        curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT"/upload/vauban/symlink-linux/$master_name/$kernel_version -XPOST | jq .ok
+    fi
 
     echo "All resources uploaded !"
 }
