@@ -332,12 +332,15 @@ function retry() {
 function docker_push() {
     local img_name="$1"
 
-    echo "Tagging docker image with $REGISTRY/$img_name and pushing it"
+    echo "Tagging docker image with $REGISTRY/$img_name"
     docker tag "$img_name" "$REGISTRY/$img_name:$current_date"
     docker tag "$img_name" "$REGISTRY/$img_name:latest"
-    retry 3 docker push "$REGISTRY/$img_name:$current_date"
-    retry 3 docker push "$REGISTRY/$img_name:latest"
-    echo "Pushed"
+    if [[ $_arg_upload == "yes" ]]; then
+        echo "Pushing images"
+        retry 3 docker push "$REGISTRY/$img_name:$current_date"
+        retry 3 docker push "$REGISTRY/$img_name:latest"
+        echo "Pushed"
+    fi
 }
 
 function ssh() {
