@@ -70,7 +70,7 @@ function stacktrace() {
     cd "$SCRIPT_DIR"
     local i=1 line file func
     while read -r line func file < <(caller "$i"); do
-        echo "[$i] $file:$line $func(): $(sed -n "$line"p "$file")" 1>&2
+        printf "[%s] %+20s:%-3s %s(): %s\n" "$i" "$file" "$line" "$func" "$(sed -n "$line"p "$file")" 1>&2
         i=$((i+1))
     done
 }

@@ -281,20 +281,23 @@ class VaubanMaster:
         # Auto expand vauban CLI based on the current stage
         vauban_cli = STAGES[cc.stage](self.configuration.config, vauban_cli, self)
 
-        if cc.debug:
-            print(" ".join(['"' + x + '"' for x in vauban_cli]))
-        if cc.check:
-            return
         my_env = os.environ.copy()
+        debug_cmd = ""
         if cc.debug:
             my_env["VAUBAN_SET_FLAGS"] = my_env.get("VAUBAN_SET_FLAGS", "") + "x"
+            debug_cmd = "VAUBAN_SET_FLAGS=" + my_env["VAUBAN_SET_FLAGS"] + " "
 
         tmp_path = f"/tmp/vauban-logs-{str(uuid.uuid4())}"
         exec_cmd = ""
         for el in vauban_cli:
             exec_cmd += "'" + el + "' "
         exec_cmd += f" > >(tee {tmp_path}-stdout) 2> >(tee {tmp_path}-stderr >&2)"
-        print(exec_cmd)
+
+        if cc.debug:
+            print(f"{debug_cmd} {exec_cmd}")
+        if cc.check:
+            return
+
         process = subprocess.run(
             exec_cmd, check=True, env=my_env, start_new_session=True, shell=True
         )
