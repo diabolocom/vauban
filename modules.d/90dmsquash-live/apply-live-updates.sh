@@ -15,6 +15,13 @@ if [ -h /dev/root ] && [ -d /run/initramfs/live/updates -o -d /updates ]; then
             find . -depth \! -type d | while read file; do
                 cp -a "$file" "$NEWROOT/$file"
             done
+
+            find . -depth -type d | while read dir; do
+                mkdir -p "/sysroot/$dir" || true
+            done
+            find . -depth \! -type d | while read file; do
+                cp -a "$file" "/sysroot/$file" || true
+            done
         )
     done
     umount $NEWROOT/run

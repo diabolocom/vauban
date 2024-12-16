@@ -15,7 +15,8 @@ depends() {
 
 # called by dracut
 install() {
-    local _dir _crt _crts _found _lib _nssckbi _p11roots _p11root
+    local _dir _crt _crts _found _lib _nssckbi _p11roots _p11root _tmp_file
+    _tmp_file="$(mktemp)"
     inst_simple "$moddir/url-lib.sh" "/lib/url-lib.sh"
     inst_multiple -o ctorrent
     inst_multiple curl sed
@@ -32,9 +33,11 @@ install() {
         for _lib in "$dracutsysrootdir$_dir"/libcurl.so.* "$dracutsysrootdir$_dir"/libcrypto.so.*; do
             [[ -e $_lib ]] || continue
             if ! [[ $_nssckbi ]]; then
-                read -r -d '' _nssckbi < <(grep -F --binary-files=text -z libnssckbi "$_lib")
+                grep -F --binary-files=text -z libnssckbi "$_lib" > "$_tmp_file"
+                read -r -d '' _nssckbi < "$_tmp_file"
             fi
-            read -r -d '' _crt < <(grep -E --binary-files=text -z "\.(pem|crt)" "$_lib" | sed 's/\x0//g')
+            grep -E --binary-files=text -z "\.(pem|crt)" "$_lib" | sed 's/\x0//g' > "$_tmp_file"
+            read -r -d '' _crt < "$_tmp_file"
             [[ $_crt ]] || continue
             [[ $_crt == /*/* ]] || continue
             if [[ -e $_crt ]]; then
@@ -51,6 +54,7 @@ install() {
             fi
         done
     fi
+    rm "$_tmp_file"
     # If we found no cert bundle files referenced in libcurl but we
     # *did* find a mention of libnssckbi (checked above), install it.
     # If its truly NSS libnssckbi, it includes its own trust bundle,

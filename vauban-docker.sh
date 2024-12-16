@@ -2,6 +2,10 @@
 
 set -eEuo pipefail
 
+function kubernetes_init_build_engine() {
+    :
+}
+
 function docker_prepare_stage_for_host() {
     local host="$1"
     local playbook="$2"
@@ -110,7 +114,7 @@ function docker_end_stage_for_host() {
         docker_push "$final_name"
     fi
     docker_push "${local_prefix}/${local_pb}"
-    docker logs "$host" > "$vauban_log_path/vauban-docker-logs-${vauban_start_time}/${host}.log" 2>&1
+    docker logs "$host" 
     docker container rm "$host"
     echo "Docker container commited and pushed. Success !"
 }
@@ -122,7 +126,7 @@ function docker_build_conffs_for_host() {
 
     printf "Building conffs for host=%s\n" "$host"
     local current_dir="$(pwd)"
-    mkdir -p overlayfs && cd overlayfs
+    mkdir -p ${BUILD_DIR} && cd ${BUILD_DIR}
     overlayfs_args=""
     first="yes"
     for stage in "${_arg_stages[@]}"; do
@@ -157,9 +161,9 @@ function docker_build_conffs_for_host() {
     fi
     rm -rf "conffs-$host.tgz"
     cd "$current_dir"
-    put_sshd_keys "$host" "overlayfs/overlayfs-$host/merged"
+    put_sshd_keys "$host" "${BUILD_DIR}/overlayfs-$host/merged"
     (
-    cd "overlayfs/overlayfs-${host}"
+    cd "${BUILD_DIR}/overlayfs-${host}"
     (
     cd merged
     if [[ -d toslash ]]; then cp -r toslash/* . && rm -rf toslash; fi
@@ -175,6 +179,8 @@ function docker_build_conffs_for_host() {
         --exclude "var/cache" \
         --exclude "root/ansible" \
         . > /dev/null
+    mv "conffs-$host.tgz" "$BUILD_DIR"
+    upload_list="$upload_list $BUILD_DIR/conffs-$host.tgz"
     if [[ -n "$overlayfs_args" ]]; then
         umount merged
     fi
@@ -189,4 +195,13 @@ function docker_prepare_rootfs() {
     cd $dest_path && docker export $$ | tar x
     docker rm $$
     )
+}
+
+function docker_create_parent_rootfs() {
+    end 1 # FIXME This was broken during the kubernetes engine addition and its various improvements and changes, and
+          #       needs some fixing
+    mount_iso
+    prefix_name="$(get_os_name)"
+    import_iso "$prefix_name"
+    source_name="${prefix_name}/iso"
 }

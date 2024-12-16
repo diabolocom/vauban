@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+PROCESS_NAME=main
+export PS4='+ [$PROCESS_NAME][${FUNCNAME:-main}] '
+
 NEWLINE=$'\n'
 TAB=$'\t'
 
@@ -40,6 +43,7 @@ function cleanup() {
 
     # Keep the conffs that were built (in case it's needed), but move them
     # so that they won't be sent again to dhcp servers on upload
+    #
     if [[ -d overlayfs ]]; then
         (
         cd overlayfs
@@ -52,15 +56,10 @@ function cleanup() {
     fi
 
     umount linux-build/merged > /dev/null 2> /dev/null || true
-    umount_rbind "overlay-$_arg_iso" > /dev/null 2> /dev/null || true
-    umount "overlay-$_arg_iso" > /dev/null 2> /dev/null || true
-    umount "fs-$_arg_iso" > /dev/null 2> /dev/null || true
-    umount "iso-$_arg_iso" > /dev/null 2> /dev/null || true
-    rm -rf "overlay-$_arg_iso" "fs-$_arg_iso" "iso-$_arg_iso" "upperdir-$_arg_iso" "workdir-$_arg_iso" > /dev/null 2>&1 || true
     losetup -D > /dev/null 2> /dev/null || true
 
     # Remove our locks
-    find "$BUILD_PATH" "$KUBE_IMAGE_DOWNLOAD_PATH" -maxdepth 2 -type f -name "*.vauban.lock" -exec bash -c '[[ "'$$'" = "$(cat {})" ]] && rm {}' \;
+    find "$BUILD_PATH" "$KUBE_IMAGE_DOWNLOAD_PATH" -maxdepth 2 -type f -name "*.vauban.lock" -exec bash -c '[[ "'$$'" = "$(cat {})" ]] && rm {}' \; 2> /dev/null
 }
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]:-.}" )" &> /dev/null && pwd )
@@ -95,7 +94,7 @@ function send_sentry() {
         -e this_cmd:"${this_command:-}" \
         -t kernel:"${_arg_kernel:-}" \
         -t upload:"${_arg_upload:-}" \
-        -t iso:"${_arg_iso:-}" \
+        -t debian_release:"${_arg_debian_release:-}" \
         -t branch:"${_arg_branch:-}" \
         -t initramfs:"${_arg_initramfs:-}" \
         -t source_image:"${_arg_source_image:-}" \
@@ -138,26 +137,13 @@ function end() {
     [[ -z "$return_code" ]] || exit "$return_code"
 }
 
-function get_os_name() {
-    name=$(chroot "overlay-$_arg_iso" bin/bash <<EOF
-    name="\$(/usr/bin/lsb_release -i | cut -d$'\t' -f2 | tr '[:upper:]' '[:lower:]')"
-    if [[ -f /etc/debian_version ]]; then
-        version="\$(cat /etc/debian_version)"
-    else
-        version="\$(/usr/bin/lsb_release -r | cut -d$'\t' -f2)"
-    fi
-    printf '%s-%s' "\$name" "\$version"
-EOF
-    )
-    echo "$name"
-}
-
 function image_name_to_local_path() {
     echo "${1//\//_}"
 }
 
 function find_kernel() {
-    find "overlay-$_arg_iso" -type f -name 'vmlinuz*' | sort | tail -n 1
+    local path="$1"
+    find "$path" -type f -name 'vmlinuz*' | sort | tail -n 1
 }
 
 function get_kernel_version() {
@@ -165,36 +151,44 @@ function get_kernel_version() {
 }
 
 function get_rootfs_kernel_version() {
-    local image_name="$1"
-    local working_dir="$BUILD_PATH/$(image_name_to_local_path "$image_name")"
+    local working_dir="$1"
     file "$(find "$working_dir"/boot -type f -name "vmlinuz*" | sort | tail -n 1)" | grep -oE "version ([^ ]+)" | sed -e "s/version //"
 }
 
-function bootstrap_fs() {
-    # We need some DNS to install the packages needed to generate the initramfs
-    mount_rbind "overlay-$_arg_iso"
-
-    chroot "overlay-$_arg_iso" bin/bash <<- "EOF"
+function bootstrap_release() {
+    local release_path="$1"
+    if [[ -n "$DEBIAN_APT_GET_PROXY" ]]; then
+        echo 'Acquire::HTTP::Proxy "'"$DEBIAN_APT_GET_PROXY"'";' > $release_path/etc/apt/apt.conf.d/01-proxy
+    fi
+    vauban_log " - Preparing the debian release with needed packages and latest kernel"
+    chroot "$release_path" bin/bash <<- "EOF"
     set -e;
-    rm -f /etc/resolv.conf;
-    echo nameserver 8.8.8.8 > /etc/resolv.conf;
     echo "" > /etc/fstab;
     export DEBIAN_FRONTEND=noninteractive
-    sed -i 's/main$/main contrib non-free/' /etc/apt/sources.list;
-    cat /etc/apt/sources.list | grep -v '^\s*#' | grep . | sort -u > /tmp/apt_sources; mv /tmp/apt_sources /etc/apt/sources.list;
-    echo "Removing grub";
+
+    debian_version="$(cat /etc/debian_version)"
+
+    if [[ "$debian_version" > 12 ]]; then
+        sed -i 's/main$/main contrib non-free non-free-firmware/' /etc/apt/sources.list;
+    else
+        sed -i 's/main$/main contrib non-free/' /etc/apt/sources.list;
+    fi
+    echo "Removing grub and updating and installing some base packages";
     export INITRD=No
     apt-get update;
-    apt-get install -y dracut > /dev/null;
-    apt-get remove -y initramfs-tools grub2-common > /dev/null;
-    echo "Updating and installing some base packages";
-    apt-get update > /dev/null;
-    apt-get install -y locales > /dev/null;
+    apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y firmware-bnx2x locales lsb-release xfsprogs isc-dhcp-client;
     localedef -i en_US -f UTF-8 en_US.UTF-8
-    apt-get install -y lsb-release > /dev/null;
-    echo "deb http://deb.debian.org/debian $(lsb_release -s -c)-proposed-updates main contrib non-free" >> /etc/apt/sources.list;
-    cat /etc/apt/sources.list | grep -v '^\s*#' | grep . | sort -u > /tmp/apt_sources; mv /tmp/apt_sources /etc/apt/sources.list;
-    apt-get update > /dev/null;
+    if [[ "$version" = "10."* ]]; then
+        apt-get install -y -o Dpkg::Options::="--force-confold" --force-yes dracut dracut-core dracut-network 2>&1 > /dev/null || true
+    else
+        (
+        cd /tmp
+        apt-get download dracut-core dracut-network dracut-live dracut-squash
+        PATH=/usr/local/sbin:/usr/bin/:/sbin dpkg -i dracut*  || true
+        apt-get install -y --fix-broken
+        )
+    fi
+    apt-get remove -y initramfs-tools grub2-common > /dev/null;
     echo "Updating linux kernel and headers";
     apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y linux-image-amd64 linux-headers-amd64 > /dev/null;
     # remove old kernel/headers version.
@@ -204,84 +198,32 @@ function bootstrap_fs() {
     apt-get remove -y $(apt list --installed 2>/dev/null | grep -E 'linux-(headers|image)-' | grep local 2>&1 | sed -E 's/\/.+$//g') > /dev/null;
     apt-get autoremove -y;
 EOF
-    umount_rbind "overlay-$_arg_iso"
 }
 
-function prepare_fs() {
-    local fs
-    fs="$(find "iso-$_arg_iso" -type f -name filesystem.squashfs)"
-
-    if [[ -n "$fs" ]]; then
-        rmdir "fs-$_arg_iso" && unsquashfs -d "fs-$_arg_iso" "$fs"
+function prepare_debian_release() {
+    local release_path="$1"
+    # FIXME remove after use
+    if [[ -d "$release_path" ]]; then
+        vauban_log "Working directory $release_path is already being used"
+        end 1
     fi
-    mount -t overlay overlay -o rw,lowerdir="fs-$_arg_iso",workdir="workdir-$_arg_iso",upperdir="upperdir-$_arg_iso" "overlay-$_arg_iso"
-    bootstrap_fs
+    mkdir -p "$release_path" "$DEBIAN_CACHE_PATH"
+    vauban_log " - Running debootstrap"
+    http_proxy=$DEBIAN_APT_GET_PROXY https_proxy=$DEBIAN_APT_GET_PROXY debootstrap --cache-dir="$DEBIAN_CACHE_PATH" --include=curl,ca-certificates,xz-utils,console-setup --extra-suites="${_arg_debian_release}"-proposed-updates --merged-usr "$_arg_debian_release" "$release_path"
+    bootstrap_release "$release_path"
+    vauban_log " - Debian release prepared"
 }
 
-prepared="false"
-
-function mount_rbind() {
-    (
-    cd "$1"
-    mkdir -p proc sys dev
-    mount -t proc /proc proc/
-    mount --rbind /sys sys/
-    mount --rbind /dev dev/
-    mount --make-rslave sys/
-    mount --make-rslave dev/
-    )
-}
-
-function umount_rbind() {
-    echo "Unmounting directories"
-    umount -R "$1"/proc
-    umount -R "$1"/sys
-    umount -R "$1"/dev
-}
-
-function ensure_devtmpfs() {
-    [[ "$(mount | grep /dev | grep devtmpfs)" ]] || mount -t devtmpfs devtmpfs /dev
-}
-
-function mount_iso() {
-    if [[ "$prepared" == "true" ]]; then
-        return
-    fi
-    if [[ -d "iso-$_arg_iso" ]]; then
-        umount "iso-$_arg_iso" > /dev/null 2>&1 || true
-        umount "fs-$_arg_iso" > /dev/null 2>&1 || true
-        umount "overlay-$_arg_iso" > /dev/null 2>&1 || true
-        rm -rf "iso-$_arg_iso" "fs-$_arg_iso" "overlay-$_arg_iso" "upperdir-$_arg_iso" "workdir-$_arg_iso"
-    fi
-    mkdir "iso-$_arg_iso" "fs-$_arg_iso" "overlay-$_arg_iso" "upperdir-$_arg_iso" "workdir-$_arg_iso" -p
-    local type
-    file_mime="$(file $iso_fullpath --mime-type -b)"
-    file_basic="$(file $iso_fullpath -b)"
-    if [[ "$file_mime" == "application/x-iso9660-image" ]]; then
-        mount -o loop -t iso9660 "$iso_fullpath" "./iso-$_arg_iso"
-    elif [[ "$file_basic" == "DOS/MBR boot sector, extended partition table (last)" ]]; then
-        ensure_devtmpfs
-        losetup -D
-        local part
-        part="$(losetup -f)"
-        echo "Going to use: $part"
-
-        losetup -f -P "$iso_fullpath"
-        mount -o loop,ro -t ext4 "${part}p1" "./fs-$_arg_iso"
-    fi
-    prepare_fs
-    prepared="true"
-}
 
 function clone_ansible_repo() {
     export GIT_SSH_COMMAND="ssh -i $(pwd)/$_arg_ssh_priv_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
     if [[ ! -d ansible ]]; then
-        git clone "$ANSIBLE_REPO" ansible
+        git clone "$ANSIBLE_REPO" ansible 2> /dev/null
     fi
     (
     cd ansible
     git config --global --add safe.directory "$(pwd)"
-    git fetch
+    git fetch 2> /dev/null
     )
 }
 
@@ -300,7 +242,7 @@ function get_conffs_hosts() {
         echo "Couldn't find any matching host in ansible inventory. If the name
 provided is correct, maybe there's an error in function get_conffs_hosts"
     fi
-    add_to_recap conffs_hosts "Building for:$NEWLINE$hosts"
+    vauban_log "Building for:$NEWLINE$hosts"
     cd "$current_dir"
 }
 
@@ -317,13 +259,9 @@ function wait_pids() {
         wait "${local_pids[i]}" || let "return_code=1"
         if [[ "$return_code" != 0 ]]; then
             must_exit="yes"  # one fail - everyone fail. No one's left behind !
-            add_content_to_recap "[KO] [$job_name] ${local_hosts_built[i]}:${TAB}failed !"
-        else
-            add_content_to_recap "[OK] [$job_name] ${local_hosts_built[i]}:${TAB}success"
         fi
     done
     if [[ "$must_exit" = "yes" ]]; then
-        add_to_recap "$job_name: details" "Job failed !. Check the build details in $recap_file or in $vauban_log_path/*$vauban_start_time/*.log"
         end 1
     fi
 }
@@ -385,14 +323,14 @@ function retry() {
 function docker_push() {
     local img_name="$1"
 
-    echo "Tagging docker image with $REGISTRY/$img_name"
+    vauban_log "Tagging docker image with $REGISTRY/$img_name"
     docker tag "$img_name" "$REGISTRY/$img_name:$current_date"
     docker tag "$img_name" "$REGISTRY/$img_name:latest"
     if [[ $_arg_upload == "yes" ]]; then
-        echo "Pushing images"
+        vauban_log " - Pushing images"
         retry 3 docker push "$REGISTRY/$img_name:$current_date"
         retry 3 docker push "$REGISTRY/$img_name:latest"
-        echo "Pushed"
+        vauban_log " - Pushed"
     fi
 }
 
@@ -431,47 +369,20 @@ else
     vauban_log_path=/tmp/vauban
 fi
 vauban_start_time="$(date --iso-8601=seconds | tr : _ | cut -d '+' -f1)"
-recap_file="$vauban_log_path/vauban-recap-$vauban_start_time"
-ansible_recap_file="$vauban_log_path/vauban-ansible-recap-$vauban_start_time"
+recap_file="$vauban_log_path/$vauban_start_time-vauban.log"
+ansible_recap_file="$vauban_log_path/$vauban_start_time-vauban-ansible.log"
 
-function init_log() {
-    mkdir -p "$vauban_log_path" \
-        "$vauban_log_path/vauban-end-stage-${vauban_start_time}" \
-        "$vauban_log_path/vauban-prepare-stage-${vauban_start_time}" \
-        "$vauban_log_path/vauban-docker-logs-${vauban_start_time}"
-    : >> $recap_file
-}
-init_log
-
-function add_to_recap() {
-    set "+x"
-    local section="$1"
-    shift
-    local content="$@"
-
-
-    printf "\n\n============================\n%s\n============================\n\n%s\n\n" "$section" "$content" >> "$recap_file"
-    set "-$VAUBAN_SET_FLAGS"
-}
-
-function add_content_to_recap() {
-    set "+x"
-    local content="$@"
-
-    printf "%s\n" "$content" >> "$recap_file"
-    set "-$VAUBAN_SET_FLAGS"
-}
-
-function add_section_to_recap() {
-    set "+x"
-    local section="$@"
-
-    printf "\n\n============================\n%s\n============================\n\n" "$section" >> "$recap_file"
-    set "-$VAUBAN_SET_FLAGS"
+function vauban_log() {
+    printf "[%+15s] %s\n" "$PROCESS_NAME" "$@" | tee -a "$recap_file"
 }
 
 function print_recap() {
     set "+x"
 
+    echo "================================================="
+    echo "================= RECAP ========================="
+    echo "================================================="
+    echo "recap file: $recap_file"
+    echo ""
     cat "$recap_file" || true
 }

@@ -3,6 +3,7 @@
 # set -eEuo pipefail
 
 function kubernetes_init_build_engine() {
+    export DEBIAN_APT_GET_PROXY="$DEBIAN_APT_GET_PROXY"
     python3 ./kubernetes_controller.py --action init
 }
 
@@ -16,6 +17,7 @@ function kubernetes_prepare_stage_for_host() {
     local final_name="$7"
     local timeout=600
 
+
     ansible_sha1="$( (cd ansible; git rev-parse HEAD) )"
     vauban_sha1="$(git rev-parse HEAD)"
     imginfo_update="$(echo -e "\n\
@@ -28,18 +30,22 @@ function kubernetes_prepare_stage_for_host() {
       build-engine: kubernetes\n\
       vauban-sha1: ${vauban_sha1}\n" | base64 -w0)"
 
+    vauban_log "      - Starting Pod for $host"
     if [[ -z "$final_name" ]]; then
         pod_ip="$(python3 kubernetes_controller.py --action create --name "$host" --source "$REGISTRY/$source" --destination "$REGISTRY/$destination:$current_date" --destination "$REGISTRY/$destination:latest" --conffs "$(to_boolean $in_conffs)" --imginfo "$imginfo_update")"
     else
         pod_ip="$(python3 kubernetes_controller.py --action create --name "$host" --source "$REGISTRY/$source" --destination "$REGISTRY/$destination:$current_date" --destination "$REGISTRY/$destination:latest" --destination "$REGISTRY/$final_name:latest" --destination "$REGISTRY/$final_name:$current_date" --conffs "$(to_boolean $in_conffs)" --imginfo "$imginfo_update")"
     fi
+    vauban_log "      - Pod for $host started successfully"
     echo -e "\n[all]\n$host ansible_host=$pod_ip\n" >> ansible/${ANSIBLE_ROOT_DIR:-.}/inventory
 }
 
 function kubernetes_end_stage_for_host() {
     local host="$1"
 
-    python3 kubernetes_controller.py --name "$host" --action end > "$vauban_log_path/vauban-docker-logs-${vauban_start_time}/${host}.log" 2>&1
+    vauban_log "      - Waiting for Pod $host to finish"
+    python3 kubernetes_controller.py --name "$host" --action end
+    vauban_log "      - Pod $host finished successfully"
 }
 
 function kubernetes_check_lock_file() {
@@ -60,6 +66,7 @@ function kubernetes_download_image() {
         echo $$ > "$image_local_path.vauban.lock"
         local_digest="$([[ -d "$image_local_path" ]] && cat "$image_local_path"/Digest.vauban || true)"
         remote_digest="$(skopeo inspect "$image_remote_path" | jq .Digest -r)"
+        (
         if [[ "$local_digest" == "$remote_digest" ]]; then
             return
         else
@@ -76,13 +83,13 @@ function kubernetes_download_image() {
         echo "Extracting layers"
         cat "$manifest_id" | jq -r '.layers.[].digest' | while read -r digest_sha; do
             digest="${digest_sha#sha256:}"
-            if [[ ! -f $digest.tar ]]; then
-                gunzip < "$digest" > "$digest".tar
-            fi
             extracted_dest="$KUBE_IMAGE_DOWNLOAD_PATH/layers/$digest"
             if [[ -f "$extracted_dest" ]]; then
                 echo "Skipping extraction of $digest: already done"
                 continue
+            fi
+            if [[ ! -f $digest.tar ]]; then
+                gunzip < "$digest" > "$digest".tar
             fi
             mkdir -p "$extracted_dest"
             tar_output="$(tar xf "$digest.tar" -C "$extracted_dest" 2>&1 || true)"
@@ -98,9 +105,11 @@ function kubernetes_download_image() {
                     end 1
                 fi
             done <<< "$tar_output"
+            rm "$digest.tar"
 
             i="$((i+1))"
         done
+        )
         )
         rm "$image_local_path.vauban.lock"
     )
@@ -116,7 +125,8 @@ function kubernetes_assemble_layers() {
     kubernetes_check_lock_file "$src_path.vauban.lock"
     echo "$$" > "$src_path.vauban.lock"
 
-    if [[ -n "$(find "$dst_path" -maxdepth 0 -empty)" ]]; then
+    if [[ -d "$dst_path" ]] && [[ -z "$(find "$dst_path" -maxdepth 0 -empty 2>/dev/null)" ]]; then
+        find "$dst_path"
         echo "$dst_path contains files. Can't continue"
         end 1
     fi
@@ -128,8 +138,10 @@ function kubernetes_assemble_layers() {
     for i in $(seq "$start" "$stop"); do
         layer_id="$(echo "$manifest" | jq -r '.layers.['"$i"'].digest')"
         layer_path="$KUBE_IMAGE_DOWNLOAD_PATH/layers/${layer_id#sha256:}"
-        cp -f --remove-destination -r "$layer_path/." "$dst_path/"
+        rsync -a --force -r -l "$layer_path/" "$dst_path/"
     done
+
+    rm "$src_path.vauban.lock"
 }
 
 function kubernetes_get_manifest() {
@@ -147,81 +159,72 @@ function kubernetes_prepare_rootfs() {
     kubernetes_download_image "$image_name"
     (
     cd "$KUBE_IMAGE_DOWNLOAD_PATH/$image_local_path"
-    layer_numbers="$(echo "$(kubernetes_get_manifest)" | jq '.layers | length')"
-    kubernetes_assemble_layers . "$dst_path" 0 "$((layer_numbers  - 1))"
+    layers_number="$(echo "$(kubernetes_get_manifest)" | jq '.layers | length')"
+    kubernetes_assemble_layers . "$dst_path" 0 "$((layers_number  - 1))"
     )
 }
 
 function kubernetes_build_conffs_for_host() {
     local host="$1"
-    local source_name="$2"
-    local prefix_name="$3"
-    echo deb fin
-    echo $1
-    echo $2
-    echo $3
-    echo fin
+    local root_image="$2"
+    local conffs_image="$3"
+    local root_image_local_path="$(image_name_to_local_path "$root_image")"
+    local conffs_image_local_path="$(image_name_to_local_path "$conffs_image")"
+    local host_local_path="$(image_name_to_local_path "$host")"
+    local dst_path="$BUILD_PATH/$host_local_path"
 
     printf "Building conffs for host=%s\n" "$host"
-    local current_dir="$(pwd)"
-    end 0
 
-
-    mkdir -p overlayfs && cd overlayfs
-    overlayfs_args=""
-    first="yes"
-    for stage in "${_arg_stages[@]}"; do
-        if [[ "$stage" = *"@"* ]]; then
-            local_pb="$(echo "$stage" | cut -d'@' -f2)"
-        else
-            local_pb="$stage"
-        fi
-        layer_path="$(docker inspect "$prefix_name/$local_pb" | jq -r '.[0].GraphDriver.Data.UpperDir')"
-        if [[ $first = "yes" ]] && [[ -n "$(find "$layer_path" -type c)" ]]; then
-            echo "file deletion in first layer of conffs detected"
-            echo "Incriminated files:"
-            find "$layer_path" -type c
-        fi
-        layer_path_no_diff="$(dirname "$layer_path")"  # removes the /diff at the end
-        docker_overlay_dir="$(dirname "$layer_path_no_diff")"  # should returns /var/lib/docker/overlay2 by default
-        short_layer_path="$docker_overlay_dir/l/$(cat $layer_path_no_diff/link)"
-        first="no"
-        if [[ $overlayfs_args == *"$short_layer_path"* ]]; then
-            echo "Layer already added. There might be stage misconfiguration/repetion"
-            echo "Layer $layer_path will be ignored."
-            continue
-        fi
-        overlayfs_args=":$short_layer_path$overlayfs_args"
-    done
-    mkdir -p "overlayfs-${host}/merged" "overlayfs-${host}/upperdir" "overlayfs-${host}/workdir" "overlayfs-${host}/lower" && cd "overlayfs-${host}"
-
-    if [[ -n "$overlayfs_args" ]]; then
-        mount -t overlay overlay -o "rw,lowerdir=lower$overlayfs_args,workdir=workdir,upperdir=upperdir,metacopy=off" merged
-    else
-        echo "WARNING: Creating some empty conffs !"
-    fi
-    rm -rf "conffs-$host.tgz"
-    cd "$current_dir"
-    put_sshd_keys "$host" "overlayfs/overlayfs-$host/merged"
+    kubernetes_download_image "$conffs_image"
+    kubernetes_download_image "$root_image"
+    root_layers_number="$(cd "$KUBE_IMAGE_DOWNLOAD_PATH/$root_image_local_path" && echo "$(kubernetes_get_manifest)" | jq '.layers | length')"
     (
-    cd "overlayfs/overlayfs-${host}"
+    cd "$KUBE_IMAGE_DOWNLOAD_PATH/$conffs_image_local_path"
+    conffs_layers_number="$(echo "$(kubernetes_get_manifest)" | jq '.layers | length')"
+    kubernetes_assemble_layers . "$dst_path" "$root_layers_number" "$((conffs_layers_number - 1))"
+    )
+
+    put_sshd_keys "$host" "$dst_path"
     (
-    cd merged
+    cd "$dst_path"
     if [[ -d toslash ]]; then cp -r toslash/* . && rm -rf toslash; fi
     rm -rf var/lib/apt/lists/*
     )
-    # There is a bug in old version of overlayfs where whiteout are not well understood and
-    # are kept as buggy char devices on the merged dir. Touching the file and removing
-    # it fixes this
-    find . -type c -exec bash -c 'filename="$1"; stat "$filename" >/dev/null 2>/dev/null || (touch "$filename" && rm "$filename")' bash {} \;
+    (
+    cd "$BUILD_PATH"
     tar cvfz "conffs-$host.tgz" \
-        -C merged \
+        -C "$host_local_path" \
         --exclude "var/log" \
         --exclude "var/cache" \
         --exclude "root/ansible" \
+        --exclude "root/.ansible" \
         . > /dev/null
-    if [[ -n "$overlayfs_args" ]]; then
-        umount merged
-    fi
     )
+    upload_list="$upload_list $BUILD_PATH/conffs-$host.tgz"
+    rm -rf "$dst_path"
+}
+
+function kubernetes_create_parent_rootfs() {
+    local name="$1"
+    shift
+    local debian_release="$1"
+    shift
+    local stages=$*
+    imginfo="$(echo -e "\n\
+---\n\
+\n\
+debian_release: $debian_release\n\
+vauban_branch: FIXME\n\
+date: $current_date\n\
+stages:\n" | base64 -w0)"
+    init_build_engine  # FIXME
+    vauban_log " - Creating Pod. Will take some time"
+    if (( ${#stages} > 0 )); then
+        python3 kubernetes_controller.py --action create --name "$name" --debian-release "$debian_release" --destination "$REGISTRY/debian-$debian_release/iso:$current_date" --destination "$REGISTRY/debian-$debian_release/iso:latest" --conffs "no" --imginfo "$imginfo" > /dev/null
+    else
+        python3 kubernetes_controller.py --action create --name "$name" --debian-release "$debian_release" --destination "$REGISTRY/debian-$debian_release/iso:$current_date" --destination "$REGISTRY/debian-$debian_release/iso:latest" --destination $REGISTRY/$_arg_name:$current_date --destination $REGISTRY/$_arg_name:latest --conffs "no" --imginfo "$imginfo" > /dev/null
+    fi
+    vauban_log " - Pod created. Waiting for it to finish"
+    retry 2 python3 kubernetes_controller.py --name "$name" --action end
+    vauban_log " - Pod ended successfully"
 }

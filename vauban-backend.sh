@@ -3,14 +3,6 @@
 
 set -eEuo pipefail
 
-function docker_import() {
-    echo "Importing in docker the filesystem from the provided ISO"
-    local name
-    name="$1"
-    echo "Creating $name/raw-iso"
-    tar -C "overlay-$_arg_iso" -c . | docker import - "$name/raw-iso"
-}
-
 function prepare_stage_for_host() {
     "${_arg_build_engine}"_prepare_stage_for_host "$@"
 }
@@ -23,16 +15,33 @@ function init_build_engine() {
     "${_arg_build_engine}"_init_build_engine "$@"
 }
 
+function prepare_rootfs() {
+    "${_arg_build_engine}"_prepare_rootfs "$@"
+}
+
+
+function create_parent_rootfs() {
+    vauban_log "Will create a rootfs from a Debian Release (${_arg_debian_release})"
+    "${_arg_build_engine}"_create_parent_rootfs "$@"
+    vauban_log "Rootfs imported. Will run it though the build_rootfs to run eventual stages"
+}
+
+
+function put_sshd_keys() {
+    [[ "${2:0:1}" = "/" ]] || vauban_log "put_sshd_keys \$host \$dst needs an absolute path for the \$dst"
+
+    "${VAULT_ENGINE}"_put_sshd_keys "$@"
+}
+
+
 function apply_stage() {
     local source_name="$1"
     shift
     local prefix_name="$1"
     shift
-    local add_host_to_prefix="$1"
-    shift
     local stage="$1"
     shift
-    local in_conffs="$1"
+    local is_conffs="$1"
     shift
     local final_name="$1"
     shift
@@ -43,7 +52,7 @@ function apply_stage() {
     local hosts_built=()
     local local_prefix=""
     local local_source_name=""
-    local log_path
+    local local_final_name=""
 
 
     if [[ "$stage" = *"@"* ]]; then
@@ -59,21 +68,28 @@ function apply_stage() {
     [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/$local_branch)" ]] || git reset "origin/$local_branch" --hard
     )
 
-    echo "Applying stage $stage to $source_name (playbook $local_pb from branch $local_branch) on $hosts"
+    vauban_log " - Applying stage $stage to ${source_name//\/HOSTNAME/} (playbook $local_pb from branch $local_branch) on $hosts"
+    vauban_log "   - Starting a container/pod for each host"
     for host in $hosts; do
-        if [[ "$add_host_to_prefix" == "yes" ]]; then
+        if [[ "$is_conffs" == "yes" ]]; then
             local_prefix="$prefix_name/$host"
             local_source_name="${source_name//HOSTNAME/$host}"
+            if [[ -z "$final_name" ]]; then
+                local_final_name=""
+            else
+                local_final_name="$final_name/$host"
+            fi
         else
             local_prefix="$prefix_name"
             local_source_name="$source_name"
+            local_final_name="$final_name"
         fi
         hosts_built+=("$host")
-        log_path="$vauban_log_path/vauban-prepare-stage-${vauban_start_time}/${host}.log"
         {
-            trap 'set +x; catch_err $? "$log_path"' ERR
-            prepare_stage_for_host "$host" "$local_pb" "$local_source_name" "$local_branch" "$in_conffs" "$local_prefix/$local_pb" "$final_name"
-        } > "$log_path" 2>&1 &
+            trap 'set +x; catch_err $?' ERR
+            PROCESS_NAME="prepare_stage"
+            prepare_stage_for_host "$host" "$local_pb" "$local_source_name" "$local_branch" "$is_conffs" "$local_prefix/$local_pb" "$local_final_name"
+        } &
         pids_prepare_stage+=("$!")
     done
 
@@ -92,46 +108,44 @@ function apply_stage() {
         ansible_connection_module="ansible.builtin.ssh"
     fi
 
-    echo "Running HOOK_PRE_ANSIBLE"
     eval "$HOOK_PRE_ANSIBLE"
-    echo "Done with HOOK_PRE_ANSIBLE"
 
-    echo "Running ansible-playbook"
+    vauban_log "   - Running ansible-playbook"
 
-    eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c "$ansible_connection_module" -v -e \''{"in_vauban": True, "in_conffs_build": '\''"$(to_boolean in_conffs)"'\''}'\' $ANSIBLE_EXTRA_ARGS | tee -a "$ansible_recap_file"
-    tail -n 50 "$ansible_recap_file" >> "$recap_file"
+    eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c "$ansible_connection_module" -v -e \''{"in_vauban": True, "in_conffs_build": '\''"$(to_boolean is_conffs)"'\''}'\' $ANSIBLE_EXTRA_ARGS | tee -a "$ansible_recap_file"
 
-    echo "Running HOOK_POST_ANSIBLE"
     eval "$HOOK_POST_ANSIBLE"
-    echo "Done with HOOK_POST_ANSIBLE"
 
     cd "$current_dir"
 
-    echo "Done with ansible for the stage $stage. Waiting for each container to wrap up ..."
+    vauban_log "    - Stage $stage applied successfully. Waiting for each container/pod to wrap up"
     for host in $hosts; do
-        if [[ "$add_host_to_prefix" == "yes" ]]; then
+        if [[ "$is_conffs" == "yes" ]]; then
             local_prefix="$prefix_name/$host"
         else
             local_prefix="$prefix_name"
         fi
-        log_path="$vauban_log_path/vauban-end-stage-${vauban_start_time}/${host}.log"
         {
-            trap 'set +x; catch_err $? "$log_path"' ERR
-            end_stage_for_host "$host" "$local_prefix/$local_pb" "$final_name"
-        } > "$log_path" 2>&1 &
+            trap 'set +x; catch_err $?' ERR
+            PROCESS_NAME="end_stage"
+            end_stage_for_host "$host" "$local_prefix/$local_pb" "$local_final_name"
+        } &
         pids_end_stage+=("$!")
     done
     wait_pids "pids_end_stage" "hosts_built" "end stage $stage"
     wait
 
-    echo "All build-containers exited"
+    vauban_log "    - Stage built"
 }
 
 function apply_stages() {
     # apply_stages will go from the image $source_name and will create $final_name by applying $stages
     # $prefix_name is the common prefix name to all the intermediate steps.
     # ie:
-    # $source_name -> $prefix_name/$stage[1] -> $prefix_name/$stage[2] -> $final_name
+    # $source_name -> $prefix_name/$stage[1] -> $prefix_name/$stage[2] -> $prefix_name/$stages[3] aka $final_name
+    #
+    # The behaviour is slightly different if we are build conffs, as the names will be:
+    # $source_name -> $prefix_name/$host/$stage[1] -> $prefix_name/$host/$stage[2] -> $prefix_name/$host/$stages[3] aka $final_name/$host
     #
     # $hostname is the hostname to use for the image building process. This will
     # simulate the docker build instance like it was named $hostname
@@ -142,11 +156,9 @@ function apply_stages() {
     shift
     local prefix_name="$1"
     shift
-    local add_host_to_prefix="$1"
-    shift
     local final_name="$1"
     shift
-    local in_conffs="$1"
+    local is_conffs="$1"
     shift
     stages=$*
 
@@ -161,59 +173,75 @@ function apply_stages() {
 
     clone_ansible_repo
 
-    echo "Applying stages to build our hosts"
+    vauban_log "Applying stages to build our hosts"
     for stage in $stages; do
         latest_stage="$stage"
     done
     for stage in $stages; do
         if [[ "$stage" == "$latest_stage" ]]; then
-            if [[ "$add_host_to_prefix" == "yes" ]]; then
-                local_final_name="$final_name/$host"
-            else
-                local_final_name="$final_name"
-            fi
+            local_final_name="$final_name"
         else
             local_final_name=""
         fi
-        apply_stage "$iter_source_name" "$prefix_name" "$add_host_to_prefix" "$stage" "$in_conffs" "$local_final_name" $hosts
-        if [[ "$add_host_to_prefix" == "yes" ]]; then
+        apply_stage "$iter_source_name" "$prefix_name" "$stage" "$is_conffs" "$local_final_name" $hosts
+        if [[ "$is_conffs" == "yes" ]]; then
             iter_source_name="${prefix_name}/HOSTNAME/${local_pb}"
         else
             iter_source_name="${prefix_name}/${local_pb}"
         fi
     done
+    vauban_log "All stages were applied"
 }
 
-function import_iso() {
-    local name
-    name="$1"
-    docker_import "$name"
-    docker build \
-        --build-arg SOURCE="${name}/raw-iso" \
-        --build-arg ISO="$_arg_iso" \
-        --build-arg VAUBAN_SHA1="$(git rev-parse HEAD || echo unspecified)" \
-        --no-cache \
-        -t "${name}/iso" \
-        -f Dockerfile.external-base .
-    docker_push "$name"/iso
+function vault_put_sshd_keys() {
+    local host dest vault_dir keys_algos keys_algo
+    host="$1"
+    dest="$2"
+
+    vauban_log "  - Putting sshd keys for $host"
+    vault_dir="$(mktemp -d)"
+    (
+    cd "$vault_dir"
+    keys_algos="$(jo -a $(jo type=ed25519 size=256) $(jo type=rsa size=4096) $(jo type=ecdsa size=384))"
+    echo $keys_algos | jq -c '.[]' | while read keys_algo; do
+        type="$(echo "$keys_algo" | jq -r .type)"
+        size="$(echo "$keys_algo" | jq -r .size)"
+        kv_out="$(vault kv get -format json "$VAULT_PATH"sshd/"$host"/"$type" 2>/dev/null | jq .data.data || true)"
+        key_name="ssh_host_${type}_key"
+        if [[ -z "$kv_out" ]]; then
+            ssh-keygen -t "$type" -f "$key_name" -q -N "" -b "$size"
+            vault kv put "$VAULT_PATH"sshd/"$host"/"$type" @<(jo "$type=@$key_name" "$type.pub=@$key_name.pub")
+        else
+            echo "$kv_out" | jq -r ".$type" > "$key_name"
+            echo "$kv_out" | jq -r '."'"$type"'.pub"' > "$key_name.pub"
+        fi
+
+    done
+    mkdir -p "$dest"/etc/ssh/
+    cp -r * "$dest"/etc/ssh/
+    chmod 0600 "$dest"/etc/ssh/ssh_host_*
+    chmod 0644 "$dest"/etc/ssh/ssh_host_*.pub
+    )
+
+    rm -rf "$vault_dir"
 }
 
-function put_sshd_keys() {
+function local_put_sshd_keys() {
     local host
     local dest
     host="$1"
     dest="${2:-tmp}"
 
-    echo "Putting sshd keys for $host"
+    vauban_log "  - Putting sshd keys for $host"
 
     (
     cd vault
     if [[ ! -f "$host".tar.gpg ]]; then
-        echo "Generating SSH keys for $host"
+        vauban_log "   - Generating SSH keys for $host"
         mkdir -p "$host/etc/ssh"
         ssh-keygen -A -f "$host"
     else
-        echo "Using SSH keys from the vault"
+        vauban_log "   - Using SSH keys from the vault"
         echo "$VAULTED_SSHD_KEYS_KEY" | gpg -d --no-symkey-cache --pinentry-mode loopback --passphrase-fd 0 "$host.tar.gpg" > "$host.tar"
         tar xvf "$host.tar"
     fi
@@ -223,16 +251,12 @@ function put_sshd_keys() {
     chmod 0644 ../"$dest"/etc/ssh/ssh_host_*.pub
 
     if [[ ! -f "$host.tar.gpg" ]]; then
-        echo "Adding SSH key to the vault"
+        vauban_log "   - Adding SSH key to the vault"
         tar cvf "$host.tar" "$host"
         echo "$VAULTED_SSHD_KEYS_KEY" | gpg -c --no-symkey-cache --pinentry-mode loopback --passphrase-fd 0 "$host.tar" # > "$host.tar.gpg"
     fi
     rm -rf "$host" "$host.tar"
     )
-}
-
-function prepare_rootfs() {
-    "${_arg_build_engine}"_prepare_rootfs "$@"
 }
 
 function export_rootfs() {
@@ -242,7 +266,8 @@ function export_rootfs() {
     # FIXME root.img name
     #
     mkdir -p "$working_dir"
-    echo "Creating rootfs from $image_name"
+    vauban_log "Creating rootfs from $image_name"
+    vauban_log " - Preparing rootfs files locally"
     prepare_rootfs "$image_name" "$working_dir"
 
     chroot "$working_dir" bin/bash << "EOF"
@@ -256,11 +281,15 @@ function export_rootfs() {
     apt-get clean -y
     rm -rf /root/.ssh/vauban__id_ed25519 /root/ansible /root/.ansible /boot/initrd* /var/lib/apt/lists/* /tmp/* /var/tmp/* || true
 EOF
-    put_sshd_keys "$image_name"
-    echo "Compressing rootfs"
+    put_sshd_keys "$image_name" "$working_dir"
+    vauban_log " - Compressing rootfs"
+    mkdir $working_dir/proc $working_dir/dev $working_dir/sys -p
     mksquashfs "$working_dir" rootfs.img -noappend -always-use-fragments -comp xz -no-exports
     tar cvf rootfs.tgz rootfs.img
-    echo "rootfs compressed and bundled in tar archive"
+    kernel_version="$(get_rootfs_kernel_version "$working_dir")"
+    rm -rf "$working_dir"
+    vauban_log "rootfs compressed and bundled in tar archive"
+    upload_list="$upload_list rootfs.tgz"
 }
 
 function build_rootfs() {
@@ -275,11 +304,10 @@ function build_rootfs() {
     stages=$*
 
     hosts="$hostname"
-    echo "Will start building the rootfs for $hostname"
-    #apply_stages "$source_name" "$prefix_name" "no" "$final_name" "no" "$stages"
+    vauban_log "Will start building the rootfs for $hostname"
+    apply_stages "$source_name" "$prefix_name" "$final_name" "no" "$stages"
     export_rootfs "$final_name"
-    end 0
-    echo "rootfs has been fully built !"
+    vauban_log "rootfs has been fully built !"
 }
 
 function build_conffs_given_host() {
@@ -294,90 +322,58 @@ function build_conffs() {
     local pids=()
     local hosts_built=()
 
-    apply_stages "$source_name" "$prefix_name" "yes" "$prefix_name" "yes" "${_arg_stages[@]}"
+    apply_stages "$source_name" "$prefix_name" "$prefix_name" "yes" "${_arg_stages[@]}"
 
-    add_section_to_recap "build_conffs: Hosts recap"
+    vauban_log "build_conffs: Hosts recap"
     for host in $hosts; do
         host_prefix_name="$prefix_name/$host"  # All intermediate images will be named name/host/stage
         # with name being the name of the OS being installed, like debian-10.8
         build_conffs_given_host "$host" "$source_name" "$host_prefix_name"
-        add_content_to_recap "$host: success"
+        vauban_log "$host: success"
     done
-    add_to_recap "build_conffs: logs" "Conffs built"
-    ci_commit_sshd_keys
+    vauban_log "build_conffs: logs" "Conffs built"
+    ci_commit_sshd_keys  # FIXME 
 }
 
 function chroot_dracut() {
-    local modules
-    local name
+    local modules_path
+    local release_path
     local kernel_version
-    name="$1"
-    modules="$2"
+    release_path="$1"
+    modules_path="$2"
     kernel_version="$3"
 
-    echo "Preparing to chroot to generate the initramfs with dracut"
+    vauban_log " - Preparing to chroot to generate the initramfs with dracut"
 
-    echo "Mounting directories"
-    mount_rbind "overlay-$_arg_iso"
+    cp dracut.conf "$release_path"
+    cp -r modules.d/* "$release_path/usr/lib/dracut/modules.d/"
 
-    cp dracut.conf "overlay-$_arg_iso/"
-    echo "Installing dracut in chroot"
-    chroot "overlay-$_arg_iso" bin/bash << "EOF"
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y openssh-server firmware-bnx2x
-    cd tmp
-    version="$(cat /etc/debian_version)"
-    if [[ "$version" = "10."* ]]; then
-        apt-get install -y -o Dpkg::Options::="--force-confold" --force-yes dracut dracut-core dracut-network 2>&1 > /dev/null || true
-    else
-        if [[ "$version" = "12."* ]]; then
-            mkdir -p /etc/apt/sources.list.d/
-            cat /etc/apt/sources.list | sed -e 's,bookworm-proposed-updates,bookworm,g' | sed -e 's,non-free$,non-free non-free-firmware,g' > /etc/apt/sources.list.d/debian-12.list
-            apt-get update;
-            apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y firmware-bnx2x isc-dhcp-client
-        fi
-        apt-get download dracut-core dracut-network dracut-live dracut-squash
-        PATH=/usr/local/sbin:/usr/bin/:/sbin dpkg -i dracut*
-        apt-get install -y --fix-broken
-    fi
-    apt-get install -y xfsprogs
-    version="$(cat /etc/debian_version)"
+    chroot "$release_path" bin/bash << EOF
+    dracut -N --conf dracut.conf -f -k "${modules_path#$release_path}" initramfs.img $kernel_version 2>&1 > /dev/null;
 EOF
-    chroot "overlay-$_arg_iso" bin/bash << EOF
-    [[ ! -d /overlay-$_arg_iso ]] && ln -s / /overlay-$_arg_iso
-EOF
-    put_sshd_keys "$name" "overlay-$_arg_iso/"
-    cp -r modules.d/* "overlay-$_arg_iso/usr/lib/dracut/modules.d/"
-
-    echo "Running dracut in chrooted environment"
-
-    chroot "overlay-$_arg_iso" bin/bash << EOF
-    dracut -N --conf dracut.conf -f -k "$modules" initramfs.img $kernel_version 2>&1 > /dev/null;
-    rm /overlay-$_arg_iso;
-EOF
-
-    umount_rbind "overlay-$_arg_iso"
 }
 
 function build_initramfs() {
-    mount_iso
-    local kernel
-    local kernel_version
-    local modules
-    local name
-    name="$1"
-    kernel="$(find_kernel)"
+    local modules_path
+    local release_path
+    vauban_log "Building the initramfs"
+    release_path="$BUILD_PATH/$_arg_debian_release"
+    prepare_debian_release "$release_path"
+    kernel="$(find_kernel "$release_path")"
     kernel_version="$(get_kernel_version "$kernel")"
+    vauban_log " - Fetching kernel $kernel_version"
 
     cp "$kernel" ./vmlinuz-default
 
-    modules="overlay-$_arg_iso/usr/lib/modules/$kernel_version"
-    if [ ! -d "$modules" ]; then
-        printf "%s does not exist. Cannot find kernel modules for version %s" "$modules" "$kernel_version"
-        exit 1
+    modules_path="$release_path/usr/lib/modules/$kernel_version"
+    if [[ ! -d "$modules_path" ]]; then
+        printf "%s does not exist. Cannot find kernel modules for version %s" "$modules_path" "$kernel_version"
+        end 1
     fi
-    chroot_dracut "$name" "$modules" "$kernel_version"
-    mv "overlay-$_arg_iso/initramfs.img" .
+    chroot_dracut "$release_path" "$modules_path" "$kernel_version"
+    vauban_log " - initramfs.img created"
+    mv "$release_path/initramfs.img" .
+    rm -rf "$release_path"
 }
 
 function upload() {
@@ -388,23 +384,19 @@ function upload() {
     master_name="${1}"
     kernel_version="${2:-}"
     upload_list="${3:-}"
+    vauban_log "Starting uploading resources"
     if [[ -z "$upload_list" ]]; then
+        # FIXME handle initramfs & empty arg
         if [[ $_arg_initramfs = "yes" ]]; then
             upload_list="initramfs.img vmlinuz-default"
         fi;
         if [[ $_arg_kernel = "yes" ]]; then
             upload_list="vmlinuz"
         fi;
-        if [[ $_arg_rootfs = "yes" ]]; then
-            upload_list="$upload_list rootfs.tgz"
-        fi;
-        if [[ $_arg_conffs = "yes" ]]; then
-            upload_list="$upload_list overlayfs/overlayfs-*/conffs-*.tgz"
-        fi;
 
         # if still empty, send everything
         if [[ -z "$upload_list" ]]; then
-            upload_list="initramfs.img vmlinuz rootfs.tgz overlayfs-*/conffs-*.tgz vmlinuz-default"
+            upload_list="initramfs.img vmlinuz rootfs.tgz $BUILD_PATH/conffs-*.tgz vmlinuz-default"
         fi;
     fi;
     must_symlink=0
@@ -415,18 +407,21 @@ function upload() {
                 exit 1
             fi
             remote_file="$file-$kernel_version"
-            curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT"/upload/vauban/linux/"$remote_file" -F "file=@$file" | jq .ok
+            vauban_log " - Uploading $file"
+            retry 3 curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT"/upload/vauban/linux/"$remote_file" -F "file=@$file" | jq .ok
             must_symlink=1
         else
             remote_file="$(basename "$file")"
-            curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT"/upload/vauban/$master_name/"$remote_file" -F "file=@$file" | jq .ok
+            vauban_log " - Uploading $file"
+            retry 3 curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT"/upload/vauban/$master_name/"$remote_file" -F "file=@$file" | jq .ok
         fi
     done
     if [[ $must_symlink == 1 ]]; then
-        curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT"/upload/vauban/symlink-linux/$master_name/$kernel_version -XPOST | jq .ok
+        vauban_log " - Creating symlinks $kernel_version"
+        retry 3 curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT"/upload/vauban/symlink-linux/$master_name/$kernel_version -XPOST | jq .ok
     fi
 
-    echo "All resources uploaded !"
+    vauban_log "All resources uploaded !"
 }
 
 function build_kernel() {

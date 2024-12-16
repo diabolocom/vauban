@@ -4,76 +4,11 @@ ARG VAUBAN_SHA1
 
 FROM ${SOURCE}
 
-WORKDIR /root
+ARG SOURCE
+ARG ISO
+ARG VAUBAN_SHA1
 
-RUN apt-get update && \
-    export DEBIAN_FRONTEND=noninteractive && \
-    apt-get purge -o Dpkg::Options::='--force-confold' -fuyq \
-        apparmor \
-        aspell \
-        bluetooth \
-        bsdmainutils \
-        cloud-init \
-        cloud-utils \
-        cloud-guest-utils \
-        javascript-common \
-        debian-faq \
-        debian-reference-es \
-        debian-reference-it \
-        dictionaries-common \
-        doc-debian \
-        dracut-core \
-        dracut-network \
-        eject \
-        fdutils \
-        fortunes-it \
-        g++ \
-        gcc \
-        grub-common \
-        hplip \
-        hspell \
-        ispell \
-        libx11-6 \
-        live-config \
-        live-task-base \
-        live-task-localisation \
-        live-task-localisation \
-        live-tools \
-        manpages-de \
-        manpages-dev \
-        manpages-es \
-        manpages-hu \
-        manpages-it \
-        manpages-ja \
-        manpages-ja-dev \
-        manpages-pl \
-        manpages-pl-dev \
-        manpages-pt \
-        manpages-tr \
-        manpages-zh \
-        mariadb-common \
-        mueller7-dict \
-        mysql-common \
-        swath \
-        tmispell-voikko \
-        voikko-fi \
-        wamerican \
-        wireless-regdb \
-        wireless-tools \
-        wpasupplicant \
-        x11-common \
-        xauth \
-        xkb-data \
-        zhcon \
-        && \
-    { apt-get purge -o Dpkg::Options::='--force-confold' -fuyq \
-        dracut-live \
-        gcc-9-base || true ; } && \
-    apt-get -y install debconf-utils && \
-    echo resolvconf resolvconf/linkify-resolvconf boolean false | debconf-set-selections && \
-    apt-get install -y linux-headers-amd64 linux-image-amd64 && \
-    apt-get autoremove -y && \
-    apt-get clean
+WORKDIR /root
 
 RUN echo "---\n\
 iso: ${ISO}\n\

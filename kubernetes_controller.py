@@ -43,16 +43,19 @@ def check_if_pods_already_exists(namespace, pods):
 
 
 def wait_for_and_get_running_pod(namespace, name):
-    log_el = "Server listening on"
+    log_els = ("Server listening on", "Debian release imported")
     start = datetime.now(UTC)
     while (datetime.now(UTC) - start).seconds < 600:
         pod = api_instance.read_namespaced_pod(name=name, namespace=namespace)
         if pod.status.phase == "Failed":
             raise RuntimeError("Pod is in Error/Failed status")
+        if pod.status.phase == "Succeeded":
+            raise RuntimeError("Pod finished before expectations")
         if pod.status.phase == "Running":
-            logs = api_instance.read_namespaced_pod_log(name=name, namespace=namespace, tail_lines=10)
-            if log_el in logs:
-                return pod
+            logs = api_instance.read_namespaced_pod_log(name=name, namespace=namespace, tail_lines=100)
+            for log_el in log_els:
+                if log_el in logs:
+                    return pod
         time.sleep(1)
     raise TimeoutError("Could not find the pod in time")
 
@@ -94,8 +97,8 @@ def update_imginfo(name, namespace, imginfo):
 
 NS = os.environ.get("KUBE_NAMESPACE", "vauban")
 
-def create_pod(name, source, destination, in_conffs, imginfo):
-    kaniko_pod = get_pod_kaniko_manifest(name, source, destination, in_conffs)
+def create_pod(name, source, debian_release, destination, in_conffs, imginfo):
+    kaniko_pod = get_pod_kaniko_manifest(name, source, debian_release, destination, in_conffs)
     conflict, list_conflicts = check_if_pods_already_exists(NS, [name])
     if conflict:
         raise RuntimeError(f"Conflict from {list_conflicts}")
@@ -112,7 +115,6 @@ def wait_for_completed_pod(namespace, name):
     start = datetime.now(UTC)
     while (datetime.now(UTC) - start).seconds < 600:
         pod = api_instance.read_namespaced_pod(name=name, namespace=namespace)
-        print(pod.status.phase)
         if pod.status.phase == "Failed":
             raise RuntimeError("Pod is in Error/Failed status")
         if pod.status.phase == "Succeeded":
@@ -123,7 +125,7 @@ def wait_for_completed_pod(namespace, name):
 def end_pod(name):
     exec_in_pod(name, NS, ["/usr/bin/env", "bash", "-c", "touch /tmp/vauban_success;"])
     wait_for_completed_pod(NS, name)
-    logs = api_instance.read_namespaced_pod_log(name=name, namespace=NS, tail_lines=20)
+    logs = api_instance.read_namespaced_pod_log(name=name, namespace=NS, tail_lines=8)
     print(f"Logs from Pod {name}:")
     print(logs)
     delete_finished_pod(NS, name)
@@ -151,6 +153,13 @@ def end_pod(name):
     help="Source image",
 )
 @click.option(
+    "--debian-release",
+    default=None,
+    show_default=True,
+    type=str,
+    help="Source debian release",
+)
+@click.option(
     "--destination",
     default=[],
     show_default=True,
@@ -171,12 +180,12 @@ def end_pod(name):
     type=str,
     help="The base64 encoded imginfo update snippet",
 )
-def main(action, name, source, destination, conffs, imginfo):
+def main(action, name, source, debian_release, destination, conffs, imginfo):
     match action:
         case "init":
             return create_needed_resources(NS)
         case "create":
-            return create_pod(name, source, destination, conffs, imginfo)
+            return create_pod(name, source, debian_release, destination, conffs, imginfo)
         case "end":
             return end_pod(name)
         case _:

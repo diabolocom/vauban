@@ -20,9 +20,9 @@ source vauban-kubernetes.sh
 
 function check_args() {
     if [[ "$_arg_rootfs" = "yes" ]]; then
-        if [[ -z "$_arg_iso" && -z "$_arg_source_image" ]]; then
+        if [[ -z "$_arg_debian_release" && -z "$_arg_source_image" ]]; then
             echo "You're trying to build a roofs (an image) without giving me a base !"
-            echo "You must provide an ISO file, or the name of another image to be used as a base"
+            echo "You must provide a debian release name, or the name of another image to be used as a base"
             echo
             print_help
             exit 1
@@ -36,16 +36,14 @@ function check_args() {
         echo "Can't build conffs from ISO only, without building rootfs. Specify a source image with -s"
         exit 1
     fi
-    if [[ "$_arg_initramfs" = "yes" ]] && [[ -z "$_arg_iso" ]]; then
-        echo "Building the initramfs requires an iso (--iso) to get the kernel and kernel modules from"
+    if [[ "$_arg_initramfs" = "yes" ]] && [[ -z "$_arg_debian_release" ]]; then
+        echo "Building the initramfs requires a debian release (--debian-release) to get the kernel and kernel modules from"
         exit 1
     fi
-    if [[ "$_arg_kernel" = "yes" ]] && [[ -z "$_arg_iso" ]]; then
-        echo "Building the kernel requires an iso (--iso) to get the kernel version and sources from"
+    if [[ "$_arg_kernel" = "yes" ]] && [[ -z "$_arg_debian_release" ]]; then
+        echo "Building the kernel requires a debian release (--debian-release) to get the kernel version and sources from"
         exit 1
     fi
-    iso_fullpath="$_arg_iso"
-    _arg_iso="$(basename "$_arg_iso")"
     if [[ "$_arg_build_engine" != "docker" ]] && [[ "$_arg_build_engine" != "kubernetes" ]]; then
         echo "--build-engine only supported values: docker, kubernetes"
         exit 1
@@ -54,26 +52,45 @@ function check_args() {
 
 function main() {
     local kernel
-    local kernel_version
+    local kernel_version=""
     local prefix_name
     local source_name
+    local upload_list=""
     # Try to be nicer
     ionice -c3 -p $$ > /dev/null 2>&1 || true
     renice -n 20 $$ > /dev/null 2>&1 || true
 
     check_args
+
+
+vauban_log "$NEWLINE$(cat <<"EOF"
+
+ ____      ____        ____    ____   ____       _____          ____  _____   ______
+|    |    |    |  ____|\   \  |    | |    | ___|\     \    ____|\   \|\    \ |\     \
+|    |    |    | /    /\    \ |    | |    ||    |\     \  /    /\    \\\    \| \     \
+|    |    |    ||    |  |    ||    | |    ||    | |     ||    |  |    |\|    \  \     |
+|    |    |    ||    |__|    ||    | |    ||    | /_ _ / |    |__|    | |     \  |    |
+|    |    |    ||    .--.    ||    | |    ||    |\    \  |    .--.    | |      \ |    |
+|\    \  /    /||    |  |    ||    | |    ||    | |    | |    |  |    | |    |\ \|    |
+| \ ___\/___ / ||____|  |____||\___\_|____||____|/____/| |____|  |____| |____||\_____/|
+ \ |   ||   | / |    |  |    || |    |    ||    /     || |    |  |    | |    |/ \|   ||
+  \|___||___|/  |____|  |____| \|____|____||____|_____|/ |____|  |____| |____|   |___|/
+    \(    )/      \(      )/      \(   )/    \(    )/      \(      )/     \(       )/
+     '    '        '      '        '   '      '    '        '      '       '       '
+=======================================================================================
+EOF
+)"
+vauban_log "                                $current_date"
     if [[ "$_arg_rootfs" = "yes" ]]; then
         if [[ -n "$_arg_source_image" ]]; then
             prefix_name="$(echo "$_arg_source_image" | cut -d'/' -f1)"
             source_name="$_arg_source_image"
         else
-            mount_iso
-            prefix_name="$(get_os_name)"
-            import_iso "$prefix_name"
-            source_name="${prefix_name}/iso"
+            create_parent_rootfs "$_arg_name" "$_arg_debian_release" "${_arg_stages[@]}"
+            prefix_name="debian-$_arg_debian_release"
+            source_name="$prefix_name/iso"
         fi
         build_rootfs "$source_name" "$prefix_name" "$_arg_name" "$_arg_name" "${_arg_stages[@]}"
-        kernel_version="$(get_rootfs_kernel_version "$_arg_name")"
         _arg_source_image="$source_name"  # conffs will be built on top of what we just built
     fi
     if [[ "$_arg_conffs" = "yes" ]]; then
@@ -83,17 +100,12 @@ function main() {
         else
             build_conffs "$_arg_name" "$prefix_name"
         fi
-        # Set the kernel_version variable to an empty string if not already defined
-        # We don't need it to upload only the conffs
-        if [[ -z "${kernel_version:-}" ]]; then
-            kernel_version=""
-        fi
     fi
     if [[ "$_arg_initramfs" = "yes" ]]; then
         [[ -z "${name:-}" ]] && name="$_arg_name"
         build_initramfs "$name"
         kernel="./vmlinuz-default"
-        kernel_version="$(get_kernel_version "$kernel")"
+        #kernel_version="$(get_kernel_version "$kernel")"
     fi
     if [[ "$_arg_kernel" = "yes" ]]; then
         [[ -z "${name:-}" ]] && name="$_arg_name"
@@ -102,11 +114,12 @@ function main() {
         kernel_version="$(get_kernel_version "$kernel")"
     fi
     if [[ $_arg_upload = "yes" ]]; then
-        upload "$_arg_name" "$kernel_version"
+        upload "$_arg_name" "$kernel_version" "$upload_list"
         if [[ "$_arg_rootfs" = "yes" ]]; then
             set_deployed "$_arg_name"
         fi
     fi
+    vauban_log "Done ! Exiting at $current_date"
     end 0
 }
 
@@ -115,7 +128,7 @@ function main() {
 # ARG_OPTIONAL_SINGLE([kernel],[p],[Build the custom kernel ?],[yes])
 # ARG_OPTIONAL_SINGLE([conffs],[l],[Build the conffs ?],[yes])
 # ARG_OPTIONAL_SINGLE([upload],[u],[Upload the generated master to DHCP servers ?],[yes])
-# ARG_OPTIONAL_SINGLE([iso],[f],[The ISO file to use as a base])
+# ARG_OPTIONAL_SINGLE([debian-release],[d],[The Debian release to use as a base (bookworm, testing, ...)])
 # ARG_OPTIONAL_SINGLE([source-image],[s],[The source image to use as a base])
 # ARG_OPTIONAL_SINGLE([ssh-priv-key],[k],[The SSH private key used to access Ansible repository ro],[./ansible-ro])
 # ARG_OPTIONAL_SINGLE([name],[n],[The name of the image to be built],[master-test])
@@ -158,7 +171,7 @@ _arg_initramfs="yes"
 _arg_kernel="yes"
 _arg_conffs="yes"
 _arg_upload="yes"
-_arg_iso=
+_arg_debian_release=
 _arg_source_image=
 _arg_ssh_priv_key="./ansible-ro"
 _arg_name="master-test"
@@ -170,14 +183,14 @@ _arg_build_engine=docker
 print_help()
 {
     printf '%s\n' "Build master images and makes coffee"
-    printf 'Usage: %s [-r|--rootfs <arg>] [-i|--initramfs <arg>] [-p|--kernel <arg>] [-l|--conffs <arg>] [-u|--upload <arg>] [-f|--iso <arg>] [-s|--source-image <arg>] [-k|--ssh-priv-key <arg>] [-n|--name <arg>] [-b|--branch <arg>] [-a|--ansible-host <arg>] [-h|--help] [<stages-1>] ... [<stages-n>] ...\n' "$0"
+    printf 'Usage: %s [-r|--rootfs <arg>] [-i|--initramfs <arg>] [-p|--kernel <arg>] [-l|--conffs <arg>] [-u|--upload <arg>] [-d|--debian-release <arg>] [-s|--source-image <arg>] [-k|--ssh-priv-key <arg>] [-n|--name <arg>] [-b|--branch <arg>] [-a|--ansible-host <arg>] [-h|--help] [<stages-1>] ... [<stages-n>] ...\n' "$0"
     printf '\t%s\n' "<stages>: The stages to add to this image, i.e. the ansible playbooks to apply. For example pb_base.yml"
     printf '\t%s\n' "-r, --rootfs: Build the rootfs ? (default: 'yes')"
     printf '\t%s\n' "-i, --initramfs: Build the initramfs ? (default: 'yes')"
     printf '\t%s\n' "-p, --kernel: Build the custom kernel ? (default: 'yes')"
     printf '\t%s\n' "-l, --conffs: Build the conffs ? (default: 'yes')"
     printf '\t%s\n' "-u, --upload: Upload the generated master to DHCP servers ? (default: 'yes')"
-    printf '\t%s\n' "-f, --iso: The ISO file to use as a base (no default)"
+    printf '\t%s\n' "-d, --debian-release: The Debian release to use as a base (bookworm, testing, ...) (no default)"
     printf '\t%s\n' "-s, --source-image: The source image to use as a base (no default)"
     printf '\t%s\n' "-k, --ssh-priv-key: The SSH private key used to access Ansible repository ro (default: './ansible-ro')"
     printf '\t%s\n' "-n, --name: The name of the image to be built (default: 'master-test')"
@@ -250,16 +263,16 @@ parse_commandline()
             -u*)
                 _arg_upload="${_key##-u}"
                 ;;
-            -f|--iso)
+            -d|--debian-release)
                 test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
-                _arg_iso="$2"
+                _arg_debian_release="$2"
                 shift
                 ;;
-            --iso=*)
-                _arg_iso="${_key##--iso=}"
+            --debian-release=*)
+                _arg_debian_release="${_key##--debian-release=}"
                 ;;
-            -f*)
-                _arg_iso="${_key##-f}"
+            -d*)
+                _arg_debian_release="${_key##-d}"
                 ;;
             -s|--source-image)
                 test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1

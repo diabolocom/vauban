@@ -31,8 +31,17 @@ UPLOAD_DIR="${UPLOAD_DIR:-}"
 # UNIX group to chown uploaded files to
 UPLOAD_OWNER="${UPLOAD_OWNER:-}"
 
+### Vault engine to store secrets
+VAULT_ENGINE=vault  # can be vault or local
+
+## local vault engine
 # Password to use to encrypt and decrypt the sshd keys that will be put per host
 VAULTED_SSHD_KEYS_KEY="${VAULTED_SSHD_KEYS_KEY:-}"
+
+## hashicorp vault
+VAULT_ADDR="${VAULT_ADDR:-}"
+VAULT_TOKEN="${VAULT_TOKEN:-}"
+VAULT_PATH=vauban_kv2/
 
 # Git authentication details to automatically commit and push ssh keys generated
 # in the CI
@@ -65,7 +74,13 @@ VAUBAN_SET_FLAGS="${VAUBAN_SET_FLAGS:-}"
 # Path where the build engine will extract layers, assemble rootfs & conffs. Needs some space there, and rw perms
 # Will be created if needed
 BUILD_PATH=/srv/build-vauban/
+# Path where debian packages will be downloaded into and cached
+DEBIAN_CACHE_PATH=/srv/debian/cache/
 ## Kubernetes build engine
 KUBE_IMAGE_DOWNLOAD_PATH=/srv/images
 KUBE_NAMESPACE="vauban"
 # end Kubernetes build engine
+
+
+# Debian optional apt-get proxy
+DEBIAN_APT_GET_PROXY=${DEBIAN_APT_GET_PROXY:-}

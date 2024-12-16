@@ -6,7 +6,7 @@ command -v unpack_archive >/dev/null || . /lib/img-lib.sh
 
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
-if getargbool 0 rd.live.debug -n -y rdlivedebug; then
+if getargbool 0 debug -n -y rdlivedebug; then
     echo "enabling debug mode" >> /dev/kmsg
     echo "$@" >> /dev/kmsg
     sleep 5

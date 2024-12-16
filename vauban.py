@@ -8,6 +8,7 @@ Manage vauban with simple arguments
 
 from __future__ import annotations  # Requires python >= 3.7
 import sys
+import uuid
 import os
 import subprocess
 import traceback
@@ -97,11 +98,12 @@ class VaubanConfiguration:
     Represent a vauban configuration from its config file
     """
 
-    def __init__(self, path="config.yml"):
+    def __init__(self, path="config.yml", output=None):
         """
         Init the object
         """
         self.path = path
+        self.output = output
         super().__init__()
         self.masters = []
         self._parse()
@@ -148,12 +150,25 @@ class VaubanConfiguration:
         return r
 
 
+class OutputHandler:
+    def __init__(self):
+        self.logs = ""
+
+    def process(self, path):
+        with open(path + "-stdout", "r") as f:
+            lines = f.readlines()
+        for line in lines:
+            if "recap file: " in line:
+                self.logs += open(line.split("recap file: ")[1].strip()).read()
+                break
+        os.remove(path + "-stdout")
+        os.remove(path + "-stderr")
+
+
 class VaubanMaster:
     """
     Represent a vauban master, with its configuration, a link to its parent, and to its children
     """
-    iso_updated = False
-
     def __init__(
         self,
         name: str,
@@ -170,23 +185,17 @@ class VaubanMaster:
         self.stages = value.get("stages", [])
         self.conffs = value.get("conffs", None)
         self.branch = value.get("branch", None)
-        self.is_iso = parent is None
-        self.iso: str = name if self.is_iso else parent.iso
+        self.is_release = parent is None
+        self.release: str = name if self.is_release else parent.release
         self.name = value.get('name', name)
         self.configuration: VaubanConfiguration = configuration
-        if parent is None:
-            self.url = value.get("url", None)
-            self.sha512sums = value.get('sha512sums', None)
-        else:
-            self.url = parent.url
-            self.sha512sums = parent.sha512sums
-        assert (self.url is None and self.sha512sums is None) or (self.url is not None and self.sha512sums is not None)  # Make sure that if url is defined, sha512sums is as well
+        self.output = configuration.output
         for k, v in value.items():
             if isinstance(v, dict):
                 self.children.append(VaubanMaster(k, v, self.configuration, self))
 
     def __repr__(self):
-        return f"VaubanMaster(name={self.name}, branch={self.branch}, conffs={self.conffs}, parent={self.parent.name}, children={[x.name for x in self.children]}, is_iso={self.is_iso}, iso={self.iso})"
+        return f"VaubanMaster(name={self.name}, branch={self.branch}, conffs={self.conffs}, parent={None if self.parent is None else self.parent.name}, children={[x.name for x in self.children]}, is_release={self.is_release}, release={self.release})"
 
     def __str__(self):
         return self.name
@@ -221,50 +230,6 @@ class VaubanMaster:
         print("=" * 53)
         print()
 
-    @staticmethod
-    def download_to_file(url, path):
-        with requests.get(url, stream=True) as r:
-            r.raise_for_status()
-            with open(path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        return path
-
-    @staticmethod
-    def sha512sum(file):
-        BUF_SIZE = 65536
-        sha512 = hashlib.sha512()
-        with open(file, 'rb') as f:
-            while True:
-                data = f.read(BUF_SIZE)
-                if not data:
-                    break
-                sha512.update(data)
-        return sha512.hexdigest()
-
-    def get_iso(self, check):
-        iso_dir = "/srv/iso/" if os.path.isdir("/srv/iso") else "./"
-        iso_path = iso_dir + self.iso  # Not using iso_name defined below because the remote name may not be the one we want locally
-        if not self.iso_updated and self.url is not None and not check:
-            iso_name = self.url.split('/')[-1]
-            sha512sums_file = requests.get(self.sha512sums).text.splitlines()
-            sha512_original = None
-            for line in sha512sums_file:
-                if iso_name in line:
-                    sha512_original = line[:128]
-                    break
-            assert sha512_original is not None
-
-            if not os.path.isfile(iso_path) or VaubanMaster.sha512sum(iso_path) != sha512_original:
-                print(f"Downloading {self.url} to {iso_path}")
-                VaubanMaster.download_to_file(self.url, iso_path)
-            assert VaubanMaster.sha512sum(iso_path) == sha512_original
-            self.iso_updated = True
-
-        if not os.path.isfile(iso_path) and not check:
-            raise Exception("ISO file not found")
-        return iso_path
-
     def _build_stage(self, cc):
         """
         Internal build function. Actually performs the build if not in debug
@@ -278,19 +243,17 @@ class VaubanMaster:
         else:
             branch = cc.branch
 
-        iso_path = self.get_iso(cc.check)
-
         vauban_cli = [
             "./vauban.sh",
             "--build-engine",
             "kubernetes",
-            "--iso",
-            iso_path,
+            "--debian-release",
+            self.release,
             "--name",
             self.name,
             "--upload",
             "no"
-            if self.is_iso or self.name in self.configuration.config["never_upload"]
+            if self.is_release or self.name in self.configuration.config["never_upload"]
             else "yes",
             "--branch",
             branch,
@@ -311,7 +274,14 @@ class VaubanMaster:
         if cc.debug:
             my_env["VAUBAN_SET_FLAGS"] = my_env.get("VAUBAN_SET_FLAGS", "") + "x"
 
-        process = subprocess.run(vauban_cli, check=True, env=my_env, start_new_session=True)
+        tmp_path = f"/tmp/vauban-logs-{str(uuid.uuid4())}"
+        exec_cmd = ""
+        for el in vauban_cli:
+            exec_cmd += "'" + el + "' "
+        exec_cmd += f" > >(tee {tmp_path}-stdout) 2> >(tee {tmp_path}-stderr >&2)"
+        print(exec_cmd)
+        process = subprocess.run(exec_cmd, check=True, env=my_env, start_new_session=True, shell=True)
+        self.output.process(tmp_path)
         assert process.returncode == 0
 
     def build(self, cc):
@@ -356,7 +326,7 @@ def rootfs(config, vauban_cli, master, only=True):  # pylint: disable=unused-arg
             "--kernel",
             "no",
         ]
-    if not master.is_iso:
+    if not master.is_release:
         vauban_cli += ["--source-image", str(master.parent)] + master.stages
     return vauban_cli
 
@@ -501,11 +471,12 @@ def vauban(**kwargs):
     if cc.check:
         cc.debug = True
 
-    config = VaubanConfiguration(cc.config_path)
+    output = OutputHandler()
+    config = VaubanConfiguration(cc.config_path, output)
     master = config.get_master(cc.name)
 
     if master is None:
-        print(f"Cannot build {cc.name}: not found in {config_path}")
+        print(f"Cannot build {cc.name}: not found in {cc.config_path}")
         return 1
     if cc.debug:
         print("Available masters:")
@@ -518,23 +489,24 @@ def vauban(**kwargs):
     except NothingToDoException as e:
         if os.environ.get("CI", None) is None:
             traceback.print_exception(e)
+            print(output.logs)
             return 1
     except subprocess.CalledProcessError as e:
         print("Building failed !")
+        print(output.logs)
         return 1
     except Exception as e:
         exc_info = sys.exc_info()
         traceback.print_exception(*exc_info)
+        print(output.logs)
         print()
         print("Building failed !")
         return 1
+    print(output.logs)
 
     if not cc.debug:
         if cc.stage in ["rootfs", "all", "trueall"]:
-            print(f"Building successful ! {cc.name} was built. Details:")
-            subprocess.run(
-                f"docker run --rm {cc.name} cat /imginfo".split(" "), check=False
-            )
+            print(f"Building successful ! {cc.name} was built")
         if cc.stage in ["conffs", "all", "trueall"]:
             print(f"Building successful ! conffs for {cc.name} was/were built.")
         if cc.stage in ["initramfs", "all", "trueall", "kernel"]:
