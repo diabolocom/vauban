@@ -418,6 +418,7 @@ function chroot_dracut() {
         PATH=/usr/local/sbin:/usr/bin/:/sbin dpkg -i dracut*
         apt-get install -y --fix-broken
     fi
+    apt-get install -y xfsprogs
     version="$(cat /etc/debian_version)"
 EOF
     chroot "overlay-$_arg_iso" bin/bash << EOF

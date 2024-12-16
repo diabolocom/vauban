@@ -21,7 +21,11 @@ file_fetch_path() {
     echo "VAUBAN dev is $dev" >> /dev/kmsg
     mkdir -p /run/liveimg_file || return 253
     echo "VAUBAN attempting to mount $dev" >> /dev/kmsg
-    mount -t auto -o ro "$dev" /run/liveimg_file >> /dev/kmsg 2>> /dev/kmsg || return 253
+    modprobe xfs >> /dev/kmsg 2>> /dev/kmsg || true
+    mount -t auto -o ro "$dev" /run/liveimg_file >> /dev/kmsg 2>> /dev/kmsg || \
+        mount -t xfs -o ro "$dev" /run/liveimg_file >> /dev/kmsg 2>> /dev/kmsg || \
+        mount -o ro "$dev" /run/liveimg_file >> /dev/kmsg 2>> /dev/kmsg || \
+        return 253
     echo "VAUBAN mount successful. Looking for $file" >> /dev/kmsg
     cp -f -- "/run/liveimg_file/$file" "$outloc" || return $?
     echo "VAUBAN $file found and cp-ed to $outloc" >> /dev/kmsg
