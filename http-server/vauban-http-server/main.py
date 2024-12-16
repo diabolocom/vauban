@@ -158,7 +158,7 @@ def _get_logs(ulid):
     try:
         pods_response = core_api_instance.list_namespaced_pod(
             namespace,
-            label_selector=f"vauban.corp.dblc.io/vauban-job-id={ulid.upper()}",
+            label_selector=f"vauban.corp.dblc.io/vauban-job-id={ulid.upper()},vauban.corp.dblc.io/vauban-type=controller",
         )
     except ApiException as e:
         pods_response = None

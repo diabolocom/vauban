@@ -14,6 +14,7 @@ spec:
     metadata:
       labels:
         vauban.corp.dblc.io/vauban-job-id: {ulid}
+        vauban.corp.dblc.io/vauban-type: controller
     spec:
       containers:
       - name: vauban
