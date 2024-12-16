@@ -157,6 +157,7 @@ def get_pod_kaniko_manifest(name, source, debian_release, tags, in_conffs, uuid)
                     "args": [
                         "--dockerfile=./Dockerfile",
                         "--single-snapshot",
+                        "--ignore-var-run=false",
                         "--context=dir:///srv/vauban",
                     ]
                     + (
