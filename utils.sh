@@ -213,7 +213,7 @@ EOF
 
 function prepare_debian_release() {
     local release_path="$1"
-    local debootstrap_extra_args
+    local debootstrap_extra_args=""
     # FIXME remove after use
     if [[ -d "$release_path" ]]; then
         vauban_log "Working directory $release_path is already being used"
