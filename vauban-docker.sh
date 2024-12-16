@@ -76,3 +76,117 @@ function docker_prepare_stage_for_host() {
         sleep 0.5
     done
 }
+
+function docker_end_stage_for_host() {
+    local host="$1"
+    local destination="$2"
+    local final_name="$3"
+    local timeout=60
+
+    if [[ "$(docker inspect "$host" | jq '.[].State.Status' -r)" != "running" ]]; then
+        echo "Container already exited. Aborting .."
+        exit 1
+    fi
+
+    container_ip="$(docker container inspect $host | jq -r '.[].NetworkSettings.Networks.bridge.IPAddress')"
+
+    printf "Container for %s signaled us %s" "$host" "$(retry 3 timeout 3 curl -m 2 http://"$container_ip":8000$status 2> /dev/null)"
+
+    echo "Waiting for container $host to exit"
+    for i in $(seq 1 $timeout); do
+        if [[ "$(docker inspect "$host" | jq '.[].State.Status' -r)" == "exited" ]]; then
+            echo "Container exited. Continuing .."
+            break
+        fi
+        if [[ "$i" == "$((timeout - 1))" ]]; then
+            echo "Our container doesn't want to stop. Aborting .."
+            exit 1
+        fi
+        sleep 0.5
+    done
+    docker commit "$host" "$destination"
+    if [[ ! -z "$final_name" ]]; then
+        docker tag "$destination" "$final_name"
+        docker_push "$final_name"
+    fi
+    docker_push "${local_prefix}/${local_pb}"
+    docker logs "$host" > "$vauban_log_path/vauban-docker-logs-${vauban_start_time}/${host}.log" 2>&1
+    docker container rm "$host"
+    echo "Docker container commited and pushed. Success !"
+}
+
+function docker_build_conffs_for_host() {
+    local host="$1"
+    local source_name="$2"
+    local prefix_name="$3"
+
+    printf "Building conffs for host=%s\n" "$host"
+    local current_dir="$(pwd)"
+    mkdir -p overlayfs && cd overlayfs
+    overlayfs_args=""
+    first="yes"
+    for stage in "${_arg_stages[@]}"; do
+        if [[ "$stage" = *"@"* ]]; then
+            local_pb="$(echo "$stage" | cut -d'@' -f2)"
+        else
+            local_pb="$stage"
+        fi
+        layer_path="$(docker inspect "$prefix_name/$local_pb" | jq -r '.[0].GraphDriver.Data.UpperDir')"
+        if [[ $first = "yes" ]] && [[ -n "$(find "$layer_path" -type c)" ]]; then
+            echo "file deletion in first layer of conffs detected"
+            echo "Incriminated files:"
+            find "$layer_path" -type c
+        fi
+        layer_path_no_diff="$(dirname "$layer_path")"  # removes the /diff at the end
+        docker_overlay_dir="$(dirname "$layer_path_no_diff")"  # should returns /var/lib/docker/overlay2 by default
+        short_layer_path="$docker_overlay_dir/l/$(cat $layer_path_no_diff/link)"
+        first="no"
+        if [[ $overlayfs_args == *"$short_layer_path"* ]]; then
+            echo "Layer already added. There might be stage misconfiguration/repetion"
+            echo "Layer $layer_path will be ignored."
+            continue
+        fi
+        overlayfs_args=":$short_layer_path$overlayfs_args"
+    done
+    mkdir -p "overlayfs-${host}/merged" "overlayfs-${host}/upperdir" "overlayfs-${host}/workdir" "overlayfs-${host}/lower" && cd "overlayfs-${host}"
+
+    if [[ -n "$overlayfs_args" ]]; then
+        mount -t overlay overlay -o "rw,lowerdir=lower$overlayfs_args,workdir=workdir,upperdir=upperdir,metacopy=off" merged
+    else
+        echo "WARNING: Creating some empty conffs !"
+    fi
+    rm -rf "conffs-$host.tgz"
+    cd "$current_dir"
+    put_sshd_keys "$host" "overlayfs/overlayfs-$host/merged"
+    (
+    cd "overlayfs/overlayfs-${host}"
+    (
+    cd merged
+    if [[ -d toslash ]]; then cp -r toslash/* . && rm -rf toslash; fi
+    rm -rf var/lib/apt/lists/*
+    )
+    # There is a bug in old version of overlayfs where whiteout are not well understood and
+    # are kept as buggy char devices on the merged dir. Touching the file and removing
+    # it fixes this
+    find . -type c -exec bash -c 'filename="$1"; stat "$filename" >/dev/null 2>/dev/null || (touch "$filename" && rm "$filename")' bash {} \;
+    tar cvfz "conffs-$host.tgz" \
+        -C merged \
+        --exclude "var/log" \
+        --exclude "var/cache" \
+        --exclude "root/ansible" \
+        . > /dev/null
+    if [[ -n "$overlayfs_args" ]]; then
+        umount merged
+    fi
+    )
+}
+
+function docker_prepare_rootfs() {
+    local image_name="$1"
+    local dest_path="$2"
+    docker create --name $$ "$image_name" --entrypoint bash
+    (
+    cd $dest_path && docker export $$ | tar x
+    docker rm $$
+    )
+}

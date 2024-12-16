@@ -15,6 +15,9 @@ import hashlib
 import json
 from copy import deepcopy
 from dataclasses import dataclass
+
+import signal
+
 try:
     import sentry_sdk
 
@@ -307,7 +310,8 @@ class VaubanMaster:
         my_env = os.environ.copy()
         if cc.debug:
             my_env["VAUBAN_SET_FLAGS"] = my_env.get("VAUBAN_SET_FLAGS", "") + "x"
-        process = subprocess.run(vauban_cli, check=True, env=my_env)
+
+        process = subprocess.run(vauban_cli, check=True, env=my_env, start_new_session=True)
         assert process.returncode == 0
 
     def build(self, cc):
@@ -428,6 +432,8 @@ STAGES = {
     "trueall": False,
 }
 
+
+signal.signal(signal.SIGUSR1, lambda a, b: None)
 
 @click.command()
 @click.option(

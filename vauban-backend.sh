@@ -12,90 +12,15 @@ function docker_import() {
 }
 
 function prepare_stage_for_host() {
-    local host="$1"
-    local playbook="$2"
-    local source="$3"
-    local branch="$4"
-    local container_id
-    local timeout=600
-
-    container_id="$(docker container inspect $host | jq -r '.[].Id')"
-    container_ip="$(docker container inspect $host | jq -r '.[].NetworkSettings.Networks.bridge.IPAddress')"
-
-    if [[ -z ${CI:-} ]]; then
-        # Try to make the container nice
-        container_pid="$(ps aux | grep "$container_id" | grep -v grep | awk '{ print $2 }')"
-        ls "/proc/$container_pid/task" | xargs renice -n 19 > /dev/null 2>&1 || true
-        cat /proc/"$container_pid"/task/*/children | xargs renice -n 19 > /dev/null 2>&1 || true
-    fi
-
-    ansible_sha1="$( (cd ansible; git rev-parse HEAD) )"
-    vauban_sha1="$(git rev-parse HEAD)"
-    imginfo_update="$(echo -e "\n\
-    - date: $(date --iso-8601=seconds)\n\
-      playbook: ${playbook}\n\
-      hostname: ${host}\n\
-      source: ${source}\n\
-      git-sha1: ${ansible_sha1}\n\
-      git-branch: ${branch}\n\
-      vauban-sha1: ${vauban_sha1}\n" | base64 -w0)"
-    retry 3 timeout 2 docker exec "$host" bash -c "echo -e $imginfo_update | base64 -d >> /imginfo"
-    echo -e "\n[all]\n$host\n" >> ansible/${ANSIBLE_ROOT_DIR:-.}/inventory
-
-    # This takes time
-
-    for i in $(seq 1 $timeout); do
-        if [[ "$(docker inspect "$container_id" | jq '.[].State.Status' -r)" != "running" ]]; then
-            echo "container exited. Aborting .."
-            exit 1
-        fi
-        if [[ "$(timeout 3 curl -m 2 "http://$container_ip:8000/ready" 2>/dev/null)" == "ready" ]]; then
-            echo "Our container is ready. Let's signal it that we are ready to pursue as well."
-            break
-        fi
-        if [[ "$i" == "$((timeout - 1))" ]]; then
-            echo "Waited for our container to be ready for too long. Aborting .."
-            exit 1
-        fi
-        sleep 0.5
-    done
+    "${_arg_build_engine}"_prepare_stage_for_host "$@"
 }
 
 function end_stage_for_host() {
-    local host="$1"
-    local status="$2"
-    local timeout=60
-
-    if [[ "$(docker inspect "$host" | jq '.[].State.Status' -r)" != "running" ]]; then
-        echo "Container already exited. Aborting .."
-        exit 1
-    fi
-
-    container_ip="$(docker container inspect $host | jq -r '.[].NetworkSettings.Networks.bridge.IPAddress')"
-
-    printf "Container for %s signaled us %s" "$host" "$(retry 3 timeout 3 curl -m 2 http://"$container_ip":8000$status 2> /dev/null)"
-
-    echo "Waiting for container $host to exit"
-    for i in $(seq 1 $timeout); do
-        if [[ "$(docker inspect "$host" | jq '.[].State.Status' -r)" == "exited" ]]; then
-            echo "Container exited. Continuing .."
-            break
-        fi
-        if [[ "$i" == "$((timeout - 1))" ]]; then
-            echo "Our container doesn't want to stop. Aborting .."
-            exit 1
-        fi
-        sleep 0.5
-    done
-    docker commit "$host" "${local_prefix}/${local_pb}"
-    docker_push "${local_prefix}/${local_pb}"
-    docker logs "$host" > "$vauban_log_path/vauban-docker-logs-${vauban_start_time}/${host}.log" 2>&1
-    docker container rm "$host"
-    echo "Docker container commited and pushed. Success !"
+    "${_arg_build_engine}"_end_stage_for_host "$@"
 }
 
-function prepare_stage_for_host() {
-    "${_arg_build_engine}"_prepare_stage_for_host "$@"
+function init_build_engine() {
+    "${_arg_build_engine}"_init_build_engine "$@"
 }
 
 function apply_stage() {
@@ -109,6 +34,8 @@ function apply_stage() {
     shift
     local in_conffs="$1"
     shift
+    local final_name="$1"
+    shift
     hosts=$*
 
     local pids_prepare_stage=()
@@ -116,7 +43,7 @@ function apply_stage() {
     local hosts_built=()
     local local_prefix=""
     local local_source_name=""
-    local status
+    local log_path
 
 
     if [[ "$stage" = *"@"* ]]; then
@@ -142,11 +69,11 @@ function apply_stage() {
             local_source_name="$source_name"
         fi
         hosts_built+=("$host")
-        {   # bash shenanigans
-            # set -x; trap send_sentry ERR; trap - SIGUSR1; trap 'previous_command=${this_command:-}; this_command=$BASH_COMMAND' DEBUG;
-
-            prepare_stage_for_host "$host" "$local_pb" "$local_source_name" "$local_branch" "$in_conffs" "$local_prefix/$local_pb"
-        } > "$vauban_log_path/vauban-prepare-stage-${vauban_start_time}/${host}.log" 2>&1 &
+        log_path="$vauban_log_path/vauban-prepare-stage-${vauban_start_time}/${host}.log"
+        {
+            trap 'set +x; catch_err $? "$log_path"' ERR
+            prepare_stage_for_host "$host" "$local_pb" "$local_source_name" "$local_branch" "$in_conffs" "$local_prefix/$local_pb" "$final_name"
+        } > "$log_path" 2>&1 &
         pids_prepare_stage+=("$!")
     done
 
@@ -159,42 +86,45 @@ function apply_stage() {
     export ANSIBLE_KEEP_REMOTE_FILES=True
     export ANSIBLE_TIMEOUT=60
     export ANSIBLE_DOCKER_TIMEOUT=60
+    if [[ $_arg_build_engine == "docker" ]]; then
+        ansible_connection_module="community.docker.docker_api"
+    elif [[ $_arg_build_engine == "kubernetes" ]]; then
+        ansible_connection_module="ansible.builtin.ssh"
+    fi
 
     echo "Running HOOK_PRE_ANSIBLE"
     eval "$HOOK_PRE_ANSIBLE"
     echo "Done with HOOK_PRE_ANSIBLE"
 
     echo "Running ansible-playbook"
-    if eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c community.docker.docker_api -v -e \''{"in_vauban": True, "in_conffs_build": '\''"$(to_boolean in_conffs)"'\''}'\' $ANSIBLE_EXTRA_ARGS | tee -a "$ansible_recap_file" ; then
-        status=/success
-    else
-        status=/failed
-    fi
+
+    eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c "$ansible_connection_module" -v -e \''{"in_vauban": True, "in_conffs_build": '\''"$(to_boolean in_conffs)"'\''}'\' $ANSIBLE_EXTRA_ARGS | tee -a "$ansible_recap_file"
     tail -n 50 "$ansible_recap_file" >> "$recap_file"
 
     echo "Running HOOK_POST_ANSIBLE"
     eval "$HOOK_POST_ANSIBLE"
     echo "Done with HOOK_POST_ANSIBLE"
 
-    echo "Done with ansible for the stage $stage. Waiting for each container to wrap up, signaling status=$status ..."
+    cd "$current_dir"
+
+    echo "Done with ansible for the stage $stage. Waiting for each container to wrap up ..."
     for host in $hosts; do
         if [[ "$add_host_to_prefix" == "yes" ]]; then
             local_prefix="$prefix_name/$host"
         else
             local_prefix="$prefix_name"
         fi
-        { set -x; trap send_sentry ERR;
-            trap - SIGUSR1;
-            trap 'previous_command=${this_command:-}; this_command=$BASH_COMMAND' DEBUG;
-            end_stage_for_host "$host" "$status"
-        } > "$vauban_log_path/vauban-end-stage-${vauban_start_time}/${host}.log" 2>&1 &
+        log_path="$vauban_log_path/vauban-end-stage-${vauban_start_time}/${host}.log"
+        {
+            trap 'set +x; catch_err $? "$log_path"' ERR
+            end_stage_for_host "$host" "$local_prefix/$local_pb" "$final_name"
+        } > "$log_path" 2>&1 &
         pids_end_stage+=("$!")
     done
     wait_pids "pids_end_stage" "hosts_built" "end stage $stage"
     wait
 
     echo "All build-containers exited"
-    cd "$current_dir"
 }
 
 function apply_stages() {
@@ -205,6 +135,8 @@ function apply_stages() {
     #
     # $hostname is the hostname to use for the image building process. This will
     # simulate the docker build instance like it was named $hostname
+
+    init_build_engine  # FIXME
 
     local source_name="$1"
     shift
@@ -218,8 +150,8 @@ function apply_stages() {
     shift
     stages=$*
 
-    local local_source_name=""
     local local_final_name=""
+    local latest_stage=""
 
     if [[ $_arg_build_engine == "docker" ]]; then
         docker image inspect "$source_name" > /dev/null 2>&1 || pull_image "$source_name"
@@ -231,25 +163,24 @@ function apply_stages() {
 
     echo "Applying stages to build our hosts"
     for stage in $stages; do
-        apply_stage "$iter_source_name" "$prefix_name" "$add_host_to_prefix" "$stage" "$in_conffs" $hosts
+        latest_stage="$stage"
+    done
+    for stage in $stages; do
+        if [[ "$stage" == "$latest_stage" ]]; then
+            if [[ "$add_host_to_prefix" == "yes" ]]; then
+                local_final_name="$final_name/$host"
+            else
+                local_final_name="$final_name"
+            fi
+        else
+            local_final_name=""
+        fi
+        apply_stage "$iter_source_name" "$prefix_name" "$add_host_to_prefix" "$stage" "$in_conffs" "$local_final_name" $hosts
         if [[ "$add_host_to_prefix" == "yes" ]]; then
             iter_source_name="${prefix_name}/HOSTNAME/${local_pb}"
         else
             iter_source_name="${prefix_name}/${local_pb}"
         fi
-    done
-    echo "All stages were applied. Tagging docker images"
-    for host in $hosts; do
-        if [[ "$add_host_to_prefix" == "yes" ]]; then
-            local_source_name="${iter_source_name//HOSTNAME/$host}"
-            local_final_name="$final_name/$host"
-        else
-            local_source_name="$iter_source_name"
-            local_final_name="$final_name"
-        fi
-        echo "Tagging $local_final_name on $local_source_name"
-        docker tag "$local_source_name" "$local_final_name" > /dev/null 2>&1
-        docker_push "$local_final_name"
     done
 }
 
@@ -300,17 +231,21 @@ function put_sshd_keys() {
     )
 }
 
+function prepare_rootfs() {
+    "${_arg_build_engine}"_prepare_rootfs "$@"
+}
+
 function export_rootfs() {
     local image_name="$1"
+    local working_dir="$BUILD_PATH/$(image_name_to_local_path "$image_name")"
 
-    rm -rf tmp && mkdir tmp
+    # FIXME root.img name
+    #
+    mkdir -p "$working_dir"
     echo "Creating rootfs from $image_name"
-    docker create --name $$ "$image_name" --entrypoint bash
-    (
-    cd tmp && docker export $$ | tar x
-    docker rm $$
-    )
-    chroot "tmp" bin/bash << "EOF"
+    prepare_rootfs "$image_name" "$working_dir"
+
+    chroot "$working_dir" bin/bash << "EOF"
     (
     cd etc
     ln -sfr /run/resolvconf/resolv.conf resolv.conf  # We must do that here because docker mounts resolv.conf
@@ -323,7 +258,7 @@ function export_rootfs() {
 EOF
     put_sshd_keys "$image_name"
     echo "Compressing rootfs"
-    mksquashfs tmp rootfs.img -noappend -always-use-fragments -comp xz -no-exports
+    mksquashfs "$working_dir" rootfs.img -noappend -always-use-fragments -comp xz -no-exports
     tar cvf rootfs.tgz rootfs.img
     echo "rootfs compressed and bundled in tar archive"
 }
@@ -341,75 +276,14 @@ function build_rootfs() {
 
     hosts="$hostname"
     echo "Will start building the rootfs for $hostname"
-    apply_stages "$source_name" "$prefix_name" "no" "$final_name" "no" "$stages"
+    #apply_stages "$source_name" "$prefix_name" "no" "$final_name" "no" "$stages"
     export_rootfs "$final_name"
+    end 0
     echo "rootfs has been fully built !"
 }
 
 function build_conffs_given_host() {
-    local host="$1"
-    local source_name="$2"
-    local prefix_name="$3"
-
-    printf "Building conffs for host=%s\n" "$host"
-    local current_dir="$(pwd)"
-    mkdir -p overlayfs && cd overlayfs
-    overlayfs_args=""
-    first="yes"
-    for stage in "${_arg_stages[@]}"; do
-        if [[ "$stage" = *"@"* ]]; then
-            local_pb="$(echo "$stage" | cut -d'@' -f2)"
-        else
-            local_pb="$stage"
-        fi
-        layer_path="$(docker inspect "$prefix_name/$local_pb" | jq -r '.[0].GraphDriver.Data.UpperDir')"
-        if [[ $first = "yes" ]] && [[ -n "$(find "$layer_path" -type c)" ]]; then
-            echo "file deletion in first layer of conffs detected"
-            echo "Incriminated files:"
-            find "$layer_path" -type c
-        fi
-        layer_path_no_diff="$(dirname "$layer_path")"  # removes the /diff at the end
-        docker_overlay_dir="$(dirname "$layer_path_no_diff")"  # should returns /var/lib/docker/overlay2 by default
-        short_layer_path="$docker_overlay_dir/l/$(cat $layer_path_no_diff/link)"
-        first="no"
-        if [[ $overlayfs_args == *"$short_layer_path"* ]]; then
-            echo "Layer already added. There might be stage misconfiguration/repetion"
-            echo "Layer $layer_path will be ignored."
-            continue
-        fi
-        overlayfs_args=":$short_layer_path$overlayfs_args"
-    done
-    mkdir -p "overlayfs-${host}/merged" "overlayfs-${host}/upperdir" "overlayfs-${host}/workdir" "overlayfs-${host}/lower" && cd "overlayfs-${host}"
-
-    if [[ -n "$overlayfs_args" ]]; then
-        mount -t overlay overlay -o "rw,lowerdir=lower$overlayfs_args,workdir=workdir,upperdir=upperdir,metacopy=off" merged
-    else
-        echo "WARNING: Creating some empty conffs !"
-    fi
-    rm -rf "conffs-$host.tgz"
-    cd "$current_dir"
-    put_sshd_keys "$host" "overlayfs/overlayfs-$host/merged"
-    (
-    cd "overlayfs/overlayfs-${host}"
-    (
-    cd merged
-    if [[ -d toslash ]]; then cp -r toslash/* . && rm -rf toslash; fi
-    rm -rf var/lib/apt/lists/*
-    )
-    # There is a bug in old version of overlayfs where whiteout are not well understood and
-    # are kept as buggy char devices on the merged dir. Touching the file and removing
-    # it fixes this
-    find . -type c -exec bash -c 'filename="$1"; stat "$filename" >/dev/null 2>/dev/null || (touch "$filename" && rm "$filename")' bash {} \;
-    tar cvfz "conffs-$host.tgz" \
-        -C merged \
-        --exclude "var/log" \
-        --exclude "var/cache" \
-        --exclude "root/ansible" \
-        . > /dev/null
-    if [[ -n "$overlayfs_args" ]]; then
-        umount merged
-    fi
-    )
+    "${_arg_build_engine}"_build_conffs_for_host "$@"
 }
 
 function build_conffs() {

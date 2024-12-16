@@ -58,3 +58,14 @@ fi
 # Flag to give to `set`. Put a `x` to have `set -x` and enable bash debug/verbose
 # mode. This flag may be disabled in specific sections
 VAUBAN_SET_FLAGS="${VAUBAN_SET_FLAGS:-}"
+
+
+### Build engines configuration
+## Common
+# Path where the build engine will extract layers, assemble rootfs & conffs. Needs some space there, and rw perms
+# Will be created if needed
+BUILD_PATH=/srv/build-vauban/
+## Kubernetes build engine
+KUBE_IMAGE_DOWNLOAD_PATH=/srv/images
+KUBE_NAMESPACE="vauban"
+# end Kubernetes build engine

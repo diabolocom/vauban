@@ -6,6 +6,7 @@
 
 set -eTEo pipefail
 
+
 # shellcheck source=vauban-config.sh
 source vauban-config.sh
 # shellcheck source=utils.sh
@@ -14,12 +15,6 @@ source utils.sh
 source vauban-backend.sh
 source vauban-docker.sh
 source vauban-kubernetes.sh
-
-set "-$VAUBAN_SET_FLAGS"
-
-trap 'catch_err $? $LINENO' ERR
-trap 'end 1' SIGUSR1
-trap '{ previous_command=${this_command:-}; this_command=$BASH_COMMAND; } 2> /dev/null' DEBUG
 
 [ "$(whoami)" != "root" ] && run_as_root
 

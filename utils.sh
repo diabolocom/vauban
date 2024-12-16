@@ -3,6 +3,24 @@
 NEWLINE=$'\n'
 TAB=$'\t'
 
+set -eTEo pipefail
+
+set "-$VAUBAN_SET_FLAGS"
+
+trap 'set +x; end 1' SIGUSR1 SIGTERM
+trap 'set +x; end' EXIT
+trap 'set +x; catch_err $?' ERR
+
+get_pgid() {
+    cut -d " " -f 5 < "/proc/$$/stat" | tr ' ' '\n'
+}
+
+
+pgid="$(get_pgid)"
+if [[ "$$" != "$pgid" ]]; then
+    exec setsid "$(readlink -f "$0")" "$@"
+fi
+
 function run_as_root() {
     echo "Must be run as root"
     exit 1
@@ -18,7 +36,7 @@ function to_boolean() {
 }
 
 function cleanup() {
-    rm -rf tmp rootfs.img
+    rm -rf tmp rootfs.img "$STACKTRACE_FILE"
 
     # Keep the conffs that were built (in case it's needed), but move them
     # so that they won't be sent again to dhcp servers on upload
@@ -40,22 +58,36 @@ function cleanup() {
     umount "iso-$_arg_iso" > /dev/null 2> /dev/null || true
     rm -rf "overlay-$_arg_iso" "fs-$_arg_iso" "iso-$_arg_iso" "upperdir-$_arg_iso" "workdir-$_arg_iso" > /dev/null 2>&1 || true
     losetup -D > /dev/null 2> /dev/null || true
+
+    # Remove our locks
+    find "$BUILD_PATH" "$KUBE_IMAGE_DOWNLOAD_PATH" -maxdepth 2 -type f -name "*.vauban.lock" -exec bash -c '[[ "'$$'" = "$(cat {})" ]] && rm {}' \;
 }
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]:-.}" )" &> /dev/null && pwd )
-function stacktrace {
+function stacktrace() {
     cd "$SCRIPT_DIR"
     local i=1 line file func
-    while read -r line func file < <(caller $i); do
-        echo "[$i] $file:$line $func(): $(sed -n "${line}"p "$file")"
-        ((i++))
+    while read -r line func file < <(caller "$i"); do
+        echo "[$i] $file:$line $func(): $(sed -n "$line"p "$file")" 1>&2
+        i=$((i+1))
     done
 }
 
 function send_sentry() {
-    triggered_cmd="$previous_command"
+     # Don't do anything if sentry-cli command doesn't exist
+    if ! command -v sentry-cli &> /dev/null; then
+        return
+    fi
+
+    local return_code="${1:-}"
+    local stacktrace_msg="${2:-}"
+    cd "$SCRIPT_DIR"
+    local line file func
+    read -r line func file < <(caller 1)
+    error_line="$(sed -n "$line"p "$file" | awk '{$1=$1};1')"
+
     UPLOAD_CI_SSH_KEY=*** UPLOAD_CREDS=*** VAULTED_SSHD_KEYS_KEY=*** REGISTRY_PASSWORD=*** sentry-cli send-event \
-        -m "'$triggered_cmd': return code ${1:-} on line ${2:-}" \
+        -m "'$error_line': return code ${return_code}" \
         -t conffs:"${_arg_conffs:-}" \
         -t rootfs:"${_arg_rootfs:-}" \
         -t name:"${_arg_name:-}" \
@@ -67,26 +99,43 @@ function send_sentry() {
         -t branch:"${_arg_branch:-}" \
         -t initramfs:"${_arg_initramfs:-}" \
         -t source_image:"${_arg_source_image:-}" \
-        -a "$(stacktrace)" \
+        -a "$stacktrace_msg" \
         -t user_sudo:"${SUDO_USER:-${USER:-undefined}}" \
         --logfile "$recap_file" || echo Could not send sentry event 1>&2
 }
 
+STACKTRACE_FILE="$(mkdir -p /tmp/vauban > /dev/null && mktemp -p /tmp/vauban/)"
 function catch_err() {
-    set +x
-    trap '' DEBUG
-    send_sentry $@
-    kill -10 $$
-    exit 0
+    stacktrace_msg="$(stacktrace 2>&1)"
+    send_sentry "$1" "$stacktrace_msg"
+    if [[ ! -z ${2:-} ]]; then
+        tail -n 15 "$2" >> "$STACKTRACE_FILE"
+    fi
+    echo -e "$stacktrace_msg" >> "$STACKTRACE_FILE"
+
+    if [[ "$$" == "$BASHPID" ]]; then
+        end 1
+    else
+        PGID="$(get_pgid)"
+        kill -10 -- "$PGID"
+        sleep 1
+        kill -15 -- -"$PGID" 2> /dev/null
+    fi
 }
 
 function end() {
     local return_code="${1:-}"
+    trap '' EXIT
     set +xeE
-    [[ -z "$(jobs -p)" ]] || kill $(jobs -p)
-    cleanup
-    print_recap
-    exit $return_code
+    [[ -z "$(jobs -p)" ]] || kill "$(jobs -p)" 2> /dev/null
+    if [[ "$$" == "$BASHPID" ]]; then
+        if [[ -z "$return_code" ]] || [[ "$return_code" == "0" ]]; then
+            print_recap "$return_code"
+        fi
+        cat "$STACKTRACE_FILE"
+        cleanup
+    fi
+    [[ -z "$return_code" ]] || exit "$return_code"
 }
 
 function get_os_name() {
@@ -103,6 +152,10 @@ EOF
     echo "$name"
 }
 
+function image_name_to_local_path() {
+    echo "${1//\//_}"
+}
+
 function find_kernel() {
     find "overlay-$_arg_iso" -type f -name 'vmlinuz*' | sort | tail -n 1
 }
@@ -113,10 +166,8 @@ function get_kernel_version() {
 
 function get_rootfs_kernel_version() {
     local image_name="$1"
-    # a combination of ~both functions above, but in docker
-    docker run --rm --name "$$-kernel" --entrypoint bash "$image_name" -c \
-        'file "$(find /boot -type f -name "vmlinuz*" | sort | tail -n 1)" \
-          | grep -oE "version ([^ ]+)" | sed -e "s/version //"'
+    local working_dir="$BUILD_PATH/$(image_name_to_local_path "$image_name")"
+    file "$(find "$working_dir"/boot -type f -name "vmlinuz*" | sort | tail -n 1)" | grep -oE "version ([^ ]+)" | sed -e "s/version //"
 }
 
 function bootstrap_fs() {
@@ -366,8 +417,12 @@ function set_deployed() {
     if [[ $image != *"$REGISTRY_HOSTNAME"* ]]; then
         image="$REGISTRY/$image"
     fi
-    docker tag "$image:$tag" "$image:deployed"
-    retry 3 docker push "$image:deployed"
+    if [[ $_arg_build_engine == "kubernetes" ]]; then
+        retry 3 skopeo copy "docker://$image:$tag" "docker://$image:deployed"
+    else
+        docker tag "$image:$tag" "$image:deployed"
+        retry 3 docker push "$image:deployed"
+    fi
 }
 
 if [[ -n ${CI:-} ]]; then
@@ -419,6 +474,4 @@ function print_recap() {
     set "+x"
 
     cat "$recap_file" || true
-
-    set "-$VAUBAN_SET_FLAGS"
 }

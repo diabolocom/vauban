@@ -13,15 +13,19 @@ FROM $SOURCE
 RUN bash -c 'mkdir -p /root/.ssh && \
         echo "FIXME" >> /root/.ssh/authorized_keys && \
         ssh-keygen -A && \
-        echo -e "PermitRootLogin yes\\nPasswordAuthentication no\\nPubkeyAuthentication yes" > /tmp/vauban_sshd && \
+        echo -e "PermitRootLogin yes\\nPasswordAuthentication no\\nPubkeyAuthentication yes\\nSubsystem sftp /usr/lib/openssh/sftp-server" > /tmp/vauban_sshd && \
         mkdir /run/sshd && \
-        timeout -k 1 3600 /usr/sbin/sshd -D -e -f /tmp/vauban_sshd || true ; \
-        if [[ -f /tmp/vauban_success ]]; then \
-            rm /tmp/vauban_* && \
-            sed -i "/vauban_build/d" /root/.ssh/authorized_keys ;\
-        else \
-            false ;\
-        fi'
+        { /usr/sbin/sshd -D -e -f /tmp/vauban_sshd ; } & \
+        for i in $(seq 1 3600); do \
+            if [[ -f /tmp/vauban_success ]]; then \
+                rm /tmp/vauban_* && \
+                sed -i "/vauban_build/d" /root/.ssh/authorized_keys ;\
+                exit 0 ;\
+            fi ;\
+            sleep 1 ;\
+        done ;\
+        exit 1 \
+        '
 """
 
 cm_dockerfile = {
@@ -32,7 +36,7 @@ cm_dockerfile = {
 }
 
 
-def get_pod_kaniko_manifest(name, source, tag):
+def get_pod_kaniko_manifest(name, source, tags, in_conffs):
     pod_kaniko = {
         "apiVersion": "v1",
         "kind": "Pod",
@@ -45,10 +49,10 @@ def get_pod_kaniko_manifest(name, source, tag):
                     "args": [
                         "--dockerfile=./Dockerfile",
                         "--context=dir:///srv/vauban",
-                        "--destination=" + tag,
                         "--build-arg",
                         "SOURCE=" + source,
-                    ],
+                        ] + ["--destination=" + tag for tag in tags]
+                    ,
                     "volumeMounts": [
                         {"name": "dockerfile", "mountPath": "/srv/vauban"},
                         {
@@ -57,6 +61,7 @@ def get_pod_kaniko_manifest(name, source, tag):
                         },
                     ],
                     "ports": [{"containerPort": 22}],
+                    "env": [{"name": "IN_CONFFS", "value": in_conffs}, {"name": "PATH", "value": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}]
                 }
             ],
             "restartPolicy": "Never",
