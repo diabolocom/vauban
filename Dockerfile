@@ -29,10 +29,12 @@ RUN apk --update add --virtual verify gpgme \
 WORKDIR /srv
 
 ARG VAUBAN_SHA1
+ARG VAUBAN_BRANCH
 
 RUN [[ ${VAUBAN_SHA1:-null} != null ]]
 
 ENV VAUBAN_SHA1=$VAUBAN_SHA1
+ENV VAUBAN_BRANCH=$VAUBAN_BRANCH
 
 COPY *.sh *.py *.conf config.yml ./
 COPY modules.d ./modules.d

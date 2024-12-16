@@ -36,8 +36,8 @@ function kubernetes_prepare_stage_for_host() {
       playbook: ${playbook}\n\
       hostname: ${host}\n\
       source: ${source}\n\
-      git-sha1: ${ansible_sha1}\n\
-      git-branch: ${branch}\n\
+      ansible-sha1: ${ansible_sha1}\n\
+      ansible-branch: ${branch}\n\
       build-engine: kubernetes\n\
       vauban-sha1: ${vauban_sha1}\n" | base64 -w0)"
 
@@ -240,17 +240,18 @@ function kubernetes_create_parent_rootfs() {
 ---\n\
 \n\
 debian_release: $debian_release\n\
-vauban_branch: FIXME\n\
+vauban_branch: $VAUBAN_BRANCH\n\
+vauban_sha1: $VAUBAN_SHA1\n\
 date: $current_date\n\
 stages:\n" | base64 -w0)"
     init_build_engine  # FIXME
     vauban_log " - Creating Pod. Will take some time"
     if (( ${#stages} > 0 )); then
-        python3 kubernetes_controller.py --action create --name "$name" --debian-release "$debian_release" --destination "$REGISTRY/debian-$debian_release/iso:$current_date" --destination "$REGISTRY/debian-$debian_release/iso:latest" --conffs "no" --imginfo "$imginfo" --uuid "$VAUBAN_KUBERNETES_UUID" > /dev/null
+        python3 kubernetes_controller.py --action create --name "$name" --debian-release "$debian_release" --destination "$REGISTRY/debian-$debian_release/iso:$current_date" --destination "$REGISTRY/debian-$debian_release/iso:latest" --conffs "no" --uuid "$VAUBAN_KUBERNETES_UUID" > /dev/null
     else
-        python3 kubernetes_controller.py --action create --name "$name" --debian-release "$debian_release" --destination "$REGISTRY/debian-$debian_release/iso:$current_date" --destination "$REGISTRY/debian-$debian_release/iso:latest" --destination "$REGISTRY/$_arg_name:$current_date" --destination "$REGISTRY/$_arg_name:latest" --conffs "no" --imginfo "$imginfo" --uuid "$VAUBAN_KUBERNETES_UUID" > /dev/null
+        python3 kubernetes_controller.py --action create --name "$name" --debian-release "$debian_release" --destination "$REGISTRY/debian-$debian_release/iso:$current_date" --destination "$REGISTRY/debian-$debian_release/iso:latest" --destination "$REGISTRY/$_arg_name:$current_date" --destination "$REGISTRY/$_arg_name:latest" --conffs "no" --uuid "$VAUBAN_KUBERNETES_UUID" > /dev/null
     fi
     vauban_log " - Pod created. Waiting for it to finish"
-    retry 2 python3 kubernetes_controller.py --name "$name" --action end
+    retry 2 python3 kubernetes_controller.py --name "$name" --action end --imginfo "$imginfo"
     vauban_log " - Pod ended successfully"
 }

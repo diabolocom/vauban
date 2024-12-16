@@ -101,7 +101,7 @@ def update_imginfo(name, namespace, imginfo):
     exec_in_pod(name, namespace, exec_command)
 
 
-def create_pod(name, source, debian_release, destination, in_conffs, imginfo, uuid):
+def create_pod(name, source, debian_release, destination, in_conffs, uuid):
     kaniko_pod = get_pod_kaniko_manifest(
         name, source, debian_release, destination, in_conffs, uuid
     )
@@ -114,7 +114,6 @@ def create_pod(name, source, debian_release, destination, in_conffs, imginfo, uu
     print(pod.status.pod_ip)
     if pod is None:
         raise RuntimeError("Pod was not well created")
-    update_imginfo(name, NS, imginfo)
     return pod.status.pod_ip
 
 
@@ -130,7 +129,8 @@ def wait_for_completed_pod(namespace, name):
     raise TimeoutError("Could not find the pod in time")
 
 
-def end_pod(name):
+def end_pod(name, imginfo):
+    update_imginfo(name, NS, imginfo)
     exec_in_pod(name, NS, ["/usr/bin/env", "bash", "-c", "touch /tmp/vauban_success;"])
     wait_for_completed_pod(NS, name)
     logs = api_instance.read_namespaced_pod_log(name=name, namespace=NS, tail_lines=8)
@@ -214,11 +214,9 @@ def main(action, name, source, debian_release, destination, conffs, imginfo, uui
         case "init":
             return create_needed_resources(NS)
         case "create":
-            return create_pod(
-                name, source, debian_release, destination, conffs, imginfo, uuid
-            )
+            return create_pod(name, source, debian_release, destination, conffs, uuid)
         case "end":
-            return end_pod(name)
+            return end_pod(name, imginfo)
         case "cleanup":
             return cleanup(uuid)
         case _:

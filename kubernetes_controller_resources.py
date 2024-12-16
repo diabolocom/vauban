@@ -51,7 +51,25 @@ function from_scratch_metadata_and_leave() {
     echo "Debian release imported"  # Important log line as it will be used as a marker of success
     # FIXME: add /imginfo and /packages files
     :
-    exit 0
+    for i in $(seq 1 3600); do
+        if [[ -f /tmp/vauban_success ]]; then
+            set +e
+            rm /tmp/vauban_*
+            echo -e "\n\
+---\n\
+packages:\n\
+\n\
+- source: debootstrap\n\
+  hostname: ${HOST_NAME}\n\
+  packages: |" >> /packages
+            apt list --installed | sed -e 's/stable,stable/stable/g' | tail -n +2 > /tmp/apt-after
+            cat /tmp/apt-after | sed "s/^/          + /g" >> /packages
+            rm -rf /tmp/* /etc/apt/apt.conf.d/99-build-proxy
+            exit 0 ;
+        fi ;
+        sleep 1 ;
+    done ;
+    exit 1
 }
 
 export INITRD=No
