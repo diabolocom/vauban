@@ -288,7 +288,7 @@ class VaubanMaster:
             debug_cmd = "VAUBAN_SET_FLAGS=" + my_env["VAUBAN_SET_FLAGS"] + " "
 
         tmp_path = f"/tmp/vauban-logs-{str(uuid.uuid4())}"
-        exec_cmd = ""
+        exec_cmd = "setsid "
         for el in vauban_cli:
             exec_cmd += "'" + el + "' "
         exec_cmd += f" > >(tee {tmp_path}-stdout) 2> >(tee {tmp_path}-stderr >&2)"
@@ -299,7 +299,7 @@ class VaubanMaster:
             return
 
         process = subprocess.run(
-            exec_cmd, check=True, env=my_env, start_new_session=True, shell=True
+            ["bash", "-c", exec_cmd], check=True, env=my_env, start_new_session=True
         )
         self.output.process(tmp_path)
         assert process.returncode == 0

@@ -121,7 +121,8 @@ function catch_err() {
         PGID="$(get_pgid)"
         kill -10 -- "$PGID"
         sleep 1
-        kill -15 -- -"$PGID" 2> /dev/null
+        kill -15 -- -"$PGID" > /dev/null 2> /dev/null
+        wait > /dev/null 2> /dev/null
     fi
 }
 
