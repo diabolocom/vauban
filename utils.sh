@@ -302,7 +302,12 @@ function docker() {
         echo "$REGISTRY_PASSWORD" | $real_docker login "$REGISTRY_HOSTNAME" --username "$REGISTRY_USERNAME" --password-stdin
     fi
 
-    $real_docker "$@" || $real_docker "$@" || $real_docker "$@" || $real_docker "$@"
+    if [[ "$1" == "push" ]]; then
+        $real_docker "$@" || \
+            $real_docker "$@"
+    else
+        $real_docker "$@"
+    fi
     local ret="$?"
 
     img_name=""

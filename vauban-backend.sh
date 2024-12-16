@@ -25,7 +25,7 @@ function prepare_stage_for_host() {
 
     for i in $(seq 1 $timeout); do
         for id in $($real_docker ps -q); do
-            if [[ "$($real_docker exec "$id" cat /tmp/stage-identification 2>/dev/null)" == "$host" ]]; then
+            if [[ "$(timeout 1 $real_docker exec "$id" cat /tmp/stage-identification 2>/dev/null)" == "$host" ]]; then
                 container_id="$id"
                 if ! $real_docker rename "$container_id" "$host"; then
                     echo "Failed to rename container $container_id. Aborting"
@@ -58,13 +58,13 @@ function prepare_stage_for_host() {
       git-sha1: ${ansible_sha1}\n\
       git-branch: ${branch}\n\
       vauban-sha1: ${vauban_sha1}\n" | base64 -w0)"
-    $real_docker exec "$id" bash -c "echo -e $imginfo_update | base64 -d >> /imginfo"
+    timeout 1 $real_docker exec "$id" bash -c "echo -e $imginfo_update | base64 -d >> /imginfo"
     echo -e "\n[all]\n$host\n" >> ansible/${ANSIBLE_ROOT_DIR:-.}/inventory
 
     # This takes time
 
     for i in $(seq 1 $timeout); do
-        if [[ "$($real_docker exec "$id" cat /tmp/stage-ready 2>/dev/null)" == "$host" ]]; then
+        if [[ "$(timeout 1 $real_docker exec "$id" cat /tmp/stage-ready 2>/dev/null)" == "$host" ]]; then
             echo "Our container is ready. Let's signal it that we are ready to pursue as well."
             break
         fi
@@ -75,7 +75,7 @@ function prepare_stage_for_host() {
         sleep 0.5
     done
 
-    $real_docker exec "$id" touch /tmp/stage-begin
+    timeout 1 $real_docker exec "$id" touch /tmp/stage-begin
     exit 0
 }
 
