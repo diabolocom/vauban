@@ -145,7 +145,7 @@ class SlackNotif:
             logs_raw = html.unescape(logs_raw.replace("\n", "\n" + (" " * 8)))
             logs_raw = ansi_escape.sub("", logs_raw)
         elif logs is not None:
-            logs = [ansi_escape("", log) for log in logs]
+            logs = [ansi_escape.sub("", log) for log in logs]
             logs = [(log[:75] + ".." if len(log) > 77 else log) for log in logs]
         values = {
             "job_tracking_msg": get_tracking_msg(event_type, ulid),
@@ -238,26 +238,44 @@ class SlackNotif:
             pass
         return None, None, None, None
 
-    def _update_notification(self, event_type, ulid, infos, context, logs, retry=3):
-        try:
-            message, slack_msg_infos, slack_msg_context, slack_msg_event_type = (
-                self._get_previous_message(ulid)
-            )
-        except SlackRatelimitedException as e:
-            self.ratelimit_freq += int(retry == 3)
+    def _call_and_catch_ratelimit(self, func, retry=3, **kwargs):
+        if (
+            self.ratelimit_timeout is not None
+            and datetime.now() > self.ratelimit_timeout
+            and self.ratelimit_freq > 1
+        ):
+            self.ratelimit_freq -= 1
             self.ratelimit_timeout = datetime.now() + timedelta(seconds=60)
-            if event_type in [
-                "update-in-progress",
-                "creation",
-            ]:  # We can afford to not update this kind of event, it's not important enough to spam Slack's API
-                return None
-            time.sleep(0.5)
+        try:
+            try:
+                return func(**kwargs)
+            except SlackApiError as e:
+                if e.response["error"] == "ratelimited":
+                    raise SlackRatelimitedException() from e
+                raise
+        except SlackRatelimitedException as e:
+            self.ratelimit_freq += 1
+            self.ratelimit_timeout = datetime.now() + timedelta(seconds=60)
             if retry >= 0:
-                return self._update_notification(
-                    event_type, ulid, infos, context, logs, retry - 1
+                time.sleep(0.5)
+                return self._call_and_catch_ratelimit(
+                    func=func, retry=(retry - 1), **kwargs
                 )
             capture_exception(e)
+            raise
+
+    def _update_notification(self, event_type, ulid, infos, context, logs):
+        retry = 3 if event_type not in ["update-in-progress", "creation"] else 0
+        try:
+            message, slack_msg_infos, slack_msg_context, slack_msg_event_type = (
+                self._call_and_catch_ratelimit(
+                    self._get_previous_message, retry=retry, ulid=ulid
+                )
+            )
+        except SlackRatelimitedException:
             return None
+        except Exception as e:
+            capture_exception(e)
 
         if message is None:
             capture_exception(SlackMessageNotFoundException(ulid))
@@ -287,14 +305,8 @@ class SlackNotif:
             capture_exception(e)
             return None
         try:
-            self.client.chat_update(
-                text=f"New Vauban job created: {ulid}",
-                channel=self.channel_id,
-                username=self.username,
-                icon_emoji=self.icon_emoji,
-                blocks=blocks,
-                ts=message_ts,
-                metadata={
+            metadata = (
+                {
                     "event_type": "vauban_job",
                     "event_payload": {
                         "vauban_ulid": ulid,
@@ -308,14 +320,23 @@ class SlackNotif:
                     },
                 },
             )
+            self._call_and_catch_ratelimit(
+                self.client.chat_update,
+                retry=retry,
+                text=f"New Vauban job created: {ulid}",
+                channel=self.channel_id,
+                username=self.username,
+                icon_emoji=self.icon_emoji,
+                blocks=blocks,
+                ts=message_ts,
+                metadata=metadata,
+            )
+        except SlackRatelimitedException:
+            return None
         except SlackApiError as e:
-            if e.response["error"] == "ratelimited":
-                self.ratelimit_freq -= 1
-                self.ratelimit_timeout = datetime.now() + timedelta(seconds=60)
-                return None
             print(blocks)
-            print(e)
             capture_exception(e)
+            return None
         return message_ts
 
     def update_in_progress(self, ulid, infos, context, logs):
