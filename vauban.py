@@ -481,7 +481,7 @@ def vauban(**kwargs):
     master = config.get_master(cc.name)
 
     if master is None:
-        print(f"Cannot build {name}: not found in {config_path}")
+        print(f"Cannot build {cc.name}: not found in {config_path}")
         return 1
     if cc.debug:
         print("Available masters:")
