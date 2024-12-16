@@ -103,7 +103,7 @@ def build():
     manifest = get_vauban_job(
         ulid,
         args.get("vauban-image", "zarakailloux/vauban:latest"),
-        vauban_cli,
+        [str(e) for e in vauban_cli],
     )
 
     try:
