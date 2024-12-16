@@ -2,11 +2,12 @@
 
 from typing import Optional
 import subprocess
-import sys
 import os
+import base64
 from dataclasses import dataclass
 import hashlib
 import yaml
+import requests
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.triggers.cron import CronTrigger
@@ -37,11 +38,11 @@ class Master:
     schedule_options: Optional[ScheduleOptions]
 
 
-def get_all_masters_with_schedule(config_yml=None):
+def get_all_masters_with_schedule(raw_txt=None, config_yml=None):
     masters = []
     if config_yml is None:
-        with open(sys.argv[1]) as f:
-            config_yml = yaml.safe_load(f.read())
+        assert raw_txt is not None
+        config_yml = yaml.safe_load(raw_txt)
 
     for master_name, v in config_yml.items():
         if not isinstance(v, dict):
@@ -54,9 +55,38 @@ def get_all_masters_with_schedule(config_yml=None):
         if "schedule" in v:
             schedule_options = ScheduleOptions(**v.get("schedule_options", {}))
             masters.append(Master(master_name, v["schedule"], schedule_options))
-        masters += get_all_masters_with_schedule(v)
+        masters += get_all_masters_with_schedule(config_yml=v)
 
     return masters
+
+
+def watch_change(first_call=False):
+    global config_hash
+    gitlab_endpoint = os.environ["GITLAB_ENDPOINT"]
+    gitlab_project_id = os.environ["GITLAB_PROJECT_ID"]
+    gitlab_token = os.environ["GITLAB_TOKEN"]
+    try:
+        answer = requests.get(
+            f"{gitlab_endpoint}/api/v4/projects/{gitlab_project_id}/repository/files/config.yml?ref=master",
+            headers={"PRIVATE-TOKEN": gitlab_token},
+        ).json()
+        new_hash = answer["content_sha256"]
+        content = base64.b64decode(answer["content"]).decode()
+    except Exception as e:
+        if first_call:
+            raise
+        print(f"Error while trying to get updates: {e}")
+        return
+    print(f"Configuration hash {new_hash}")
+    if config_hash is None:
+        config_hash = new_hash
+    if config_hash != new_hash or first_call:
+        print("Configuration changed, changing the jobs")
+        build_list = get_all_masters_with_schedule(raw_txt=content)
+        for job in scheduler.get_jobs():
+            job.remove()
+        schedule_all(scheduler, build_list)
+        config_hash = new_hash
 
 
 def parse_cron(cron_str):
@@ -121,25 +151,8 @@ def build(master, schedule_options):
         print(f"failed to build master {master}")
 
 
-def watch_change():
-    global config_hash
-    with open(sys.argv[1], "rb") as f:
-        new_hash = hashlib.blake2s(f.read()).hexdigest()
-    print(f"Configuration hash {new_hash}")
-    if config_hash is None:
-        config_hash = new_hash
-    if config_hash != new_hash:
-        print("Configuration changed, changing the jobs")
-        build_list = get_all_masters_with_schedule()
-        for job in scheduler.get_jobs():
-            job.remove()
-        schedule_all(scheduler, build_list)
-        config_hash = new_hash
-
-
 def main():
-    build_list = get_all_masters_with_schedule()
-    schedule_all(scheduler, build_list)
+    watch_change(first_call=True)
     try:
         scheduler.start()
     except KeyboardInterrupt:
