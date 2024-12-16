@@ -275,7 +275,7 @@ def delete(ulid):
             label_selector=f"vauban.corp.dblc.io/vauban-job-id={ulid.upper()}",
         )
         if jobs_response is not None:
-            for job in jobs_response:
+            for job in jobs_response.items:
                 batch_api_instance.delete_namespaced_job(
                     job.metadata.name, namespace, propagation_policy="Background"
                 )
