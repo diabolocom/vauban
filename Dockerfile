@@ -19,7 +19,7 @@ RUN apk --update add --virtual verify gpgme \
  && mv vault /usr/local/bin/ \
  && apk del busybox \
  && apk add --no-cache bash squashfs-tools git openssh-client coreutils binutils findutils jq \
-    grep file make gpg gpg-agent util-linux xxhash curl vim \
+    grep file make gpg gpg-agent util-linux xxhash curl vim git-lfs \
     tar skopeo htop jo debootstrap rsync \
  && pip install --break-system-packages -r requirements.txt \
  && pip install --break-system-packages ansible \
