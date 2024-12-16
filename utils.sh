@@ -303,7 +303,7 @@ function docker_login() {
             echo no REGISTRY_PASSWORD variable found, and not currently logged in to the docker registry.
             exit 1
         fi
-        echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY_HOSTNAME" --username "$REGISTRY_USERNAME" --password-stdin
+        echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY_HOSTNAME" --username "$REGISTRY_USERNAME" --password-stdin 2> /dev/null
     fi
 }
 docker_login

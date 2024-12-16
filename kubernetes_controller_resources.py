@@ -1,16 +1,6 @@
 import base64
 import os
 
-secret_registryconfig = {
-    "apiVersion": "v1",
-    "kind": "Secret",
-    "metadata": {"name": "vauban-registryconfig"},
-    "data": {
-        "config.json": "FIXME"
-    },
-}
-
-
 first_rootfs_script = f"DEBIAN_APT_GET_PROXY={os.environ.get('DEBIAN_APT_GET_PROXY', '')}" + """
 set -exo pipefail
 

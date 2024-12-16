@@ -1,8 +1,7 @@
 services:
   vauban-http-server:
     build: .
-    ports:
-      - 5000:5000
+    network_mode: host
     container_name: vauban-http-server
     volumes:
       - ./vauban-http-server:/app/vauban-http-server

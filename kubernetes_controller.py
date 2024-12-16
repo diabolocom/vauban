@@ -6,7 +6,7 @@ import click
 import time
 from datetime import datetime, UTC
 from kubernetes import client, config, utils
-from kubernetes_controller_resources import cm_dockerfile, secret_registryconfig, get_pod_kaniko_manifest
+from kubernetes_controller_resources import cm_dockerfile, get_pod_kaniko_manifest
 from kubernetes.stream import stream
 
 def eprint(*args, **kwargs):
@@ -18,6 +18,7 @@ except:
     config.load_incluster_config()
 k8s_client = client.ApiClient()
 api_instance = client.CoreV1Api(k8s_client)
+NS = os.environ.get("KUBE_NAMESPACE", "vauban")
 
 
 def delete_finished_pod(namespace, pod):
@@ -69,15 +70,6 @@ def create_needed_resources(namespace):
             )
         else:
             raise
-    try:
-        utils.create_from_dict(k8s_client, secret_registryconfig, namespace=namespace)
-    except utils.FailToCreateError as e:
-        if e.api_exceptions[0].reason == "Conflict":
-            api_instance.patch_namespaced_secret(
-                name="vauban-registryconfig", body=secret_registryconfig, namespace=namespace
-            )
-        else:
-            raise
 
 def exec_in_pod(name, namespace, exec_command):
     resp = stream(api_instance.connect_get_namespaced_pod_exec,
@@ -94,8 +86,6 @@ def update_imginfo(name, namespace, imginfo):
         '-c',
         f'echo -e {imginfo} | base64 -d >> /imginfo;']
     exec_in_pod(name, namespace, exec_command)
-
-NS = os.environ.get("KUBE_NAMESPACE", "vauban")
 
 def create_pod(name, source, debian_release, destination, in_conffs, imginfo):
     kaniko_pod = get_pod_kaniko_manifest(name, source, debian_release, destination, in_conffs)

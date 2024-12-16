@@ -477,7 +477,7 @@ def vauban(**kwargs):
 
     if master is None:
         print(f"Cannot build {cc.name}: not found in {cc.config_path}")
-        return 1
+        sys.exit(1)
     if cc.debug:
         print("Available masters:")
         print(json.dumps(config.list_masters(), indent=4))
@@ -490,18 +490,18 @@ def vauban(**kwargs):
         if os.environ.get("CI", None) is None:
             traceback.print_exception(e)
             print(output.logs)
-            return 1
+            sys.exit(1)
     except subprocess.CalledProcessError as e:
         print("Building failed !")
         print(output.logs)
-        return 1
+        sys.exit(1)
     except Exception as e:
         exc_info = sys.exc_info()
         traceback.print_exception(*exc_info)
         print(output.logs)
         print()
         print("Building failed !")
-        return 1
+        sys.exit(1)
     print(output.logs)
 
     if not cc.debug:
@@ -515,6 +515,4 @@ def vauban(**kwargs):
 
 
 if __name__ == "__main__":
-    sys.exit(
-        vauban(auto_envvar_prefix="VAUBAN")
-    )  # pylint: disable=no-value-for-parameter
+    vauban(auto_envvar_prefix="VAUBAN")

@@ -13,3 +13,5 @@ ansible
 linux-build
 vmlinuz*
 venv
+ansible-ro
+.secrets.env

@@ -15,7 +15,7 @@ FROM base AS builder
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python-dev-is-python3
+    apt-get install -y --no-install-recommends python-dev-is-python3 curl
 
 COPY pyproject.toml poetry.lock ./
 
