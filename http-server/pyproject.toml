@@ -12,6 +12,7 @@ kubernetes = "^31.0.0"
 python-ulid = "^2.7.0"
 pyyaml = "^6.0.2"
 sentry-sdk = {extras = ["flask"], version = "^2.14.0"}
+requests = "^2.32.3"
 
 
 [build-system]

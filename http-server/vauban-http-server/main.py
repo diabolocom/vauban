@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, session
 from flask import request, jsonify
 import os
 from kubernetes import client, config, utils
@@ -7,6 +7,8 @@ from kubernetes.stream import stream
 from ulid import ULID
 from .kube import get_vauban_job
 import sentry_sdk
+from sentry_sdk import capture_exception
+from sentry_sdk.integrations.flask import FlaskIntegration
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN", None)
 if SENTRY_DSN:
@@ -19,6 +21,7 @@ if SENTRY_DSN:
         ],
         enable_tracing=False,
     )
+
 
 app = Flask(__name__)
 
@@ -80,6 +83,7 @@ def build():
     try:
         api_response = batch_api_instance.create_namespaced_job(namespace, manifest)
     except ApiException as e:
+        capture_exception(e)
         return (
             jsonify({"status": "error", "message": f"Failed to run a new job: {e}\n"}),
             500,
@@ -151,6 +155,8 @@ def status(ulid):
         return jsonify(
             {"status": "ok", "message": "Job is done ! Build successful"} | log_objs
         )
+
+    capture_exception(Exception(status))
     return (
         jsonify(
             {"status": "unknown", "message": f"Job in an unknown state: {str(status)}"}
