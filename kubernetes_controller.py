@@ -9,8 +9,10 @@ from kubernetes import client, config, utils
 from kubernetes_controller_resources import cm_dockerfile, get_pod_kaniko_manifest
 from kubernetes.stream import stream
 
+
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
+
 
 try:
     config.load_kube_config()
@@ -26,6 +28,7 @@ def delete_finished_pod(namespace, pod):
         api_instance.delete_namespaced_pod(pod, namespace=namespace)
     except:
         pass
+
 
 def check_if_pods_already_exists(namespace, pods):
     assert isinstance(pods, list)
@@ -53,12 +56,15 @@ def wait_for_and_get_running_pod(namespace, name):
         if pod.status.phase == "Succeeded":
             raise RuntimeError("Pod finished before expectations")
         if pod.status.phase == "Running":
-            logs = api_instance.read_namespaced_pod_log(name=name, namespace=namespace, tail_lines=100)
+            logs = api_instance.read_namespaced_pod_log(
+                name=name, namespace=namespace, tail_lines=100
+            )
             for log_el in log_els:
                 if log_el in logs:
                     return pod
         time.sleep(1)
     raise TimeoutError("Could not find the pod in time")
+
 
 def create_needed_resources(namespace):
     try:
@@ -71,24 +77,34 @@ def create_needed_resources(namespace):
         else:
             raise
 
+
 def exec_in_pod(name, namespace, exec_command):
-    resp = stream(api_instance.connect_get_namespaced_pod_exec,
-                  name,
-                  namespace,
-                  command=exec_command,
-                  stderr=True, stdin=False,
-                  stdout=True, tty=False)
+    resp = stream(
+        api_instance.connect_get_namespaced_pod_exec,
+        name,
+        namespace,
+        command=exec_command,
+        stderr=True,
+        stdin=False,
+        stdout=True,
+        tty=False,
+    )
+
 
 def update_imginfo(name, namespace, imginfo):
     exec_command = [
-        '/usr/bin/env',
-        'bash',
-        '-c',
-        f'echo -e {imginfo} | base64 -d >> /imginfo;']
+        "/usr/bin/env",
+        "bash",
+        "-c",
+        f"echo -e {imginfo} | base64 -d >> /imginfo;",
+    ]
     exec_in_pod(name, namespace, exec_command)
 
+
 def create_pod(name, source, debian_release, destination, in_conffs, imginfo, uuid):
-    kaniko_pod = get_pod_kaniko_manifest(name, source, debian_release, destination, in_conffs, uuid)
+    kaniko_pod = get_pod_kaniko_manifest(
+        name, source, debian_release, destination, in_conffs, uuid
+    )
     conflict, list_conflicts = check_if_pods_already_exists(NS, [name])
     if conflict:
         raise RuntimeError(f"Conflict from {list_conflicts}")
@@ -101,6 +117,7 @@ def create_pod(name, source, debian_release, destination, in_conffs, imginfo, uu
     update_imginfo(name, NS, imginfo)
     return pod.status.pod_ip
 
+
 def wait_for_completed_pod(namespace, name):
     start = datetime.now(UTC)
     while (datetime.now(UTC) - start).seconds < 600:
@@ -112,6 +129,7 @@ def wait_for_completed_pod(namespace, name):
         time.sleep(1)
     raise TimeoutError("Could not find the pod in time")
 
+
 def end_pod(name):
     exec_in_pod(name, NS, ["/usr/bin/env", "bash", "-c", "touch /tmp/vauban_success;"])
     wait_for_completed_pod(NS, name)
@@ -120,12 +138,19 @@ def end_pod(name):
     print(logs)
     delete_finished_pod(NS, name)
 
+
 def cleanup(uuid):
     ret = api_instance.list_namespaced_pod(namespace=NS)
     for pod in ret.items:
-        if pod.metadata.labels is not None and "vauban.corp.dblc.io/uuid" in pod.metadata.labels:
+        if (
+            pod.metadata.labels is not None
+            and "vauban.corp.dblc.io/uuid" in pod.metadata.labels
+        ):
             if pod.metadata.labels["vauban.corp.dblc.io/uuid"] == uuid:
-                api_instance.delete_namespaced_pod(pod.metadata.name, NS, grace_period_seconds=1)
+                api_instance.delete_namespaced_pod(
+                    pod.metadata.name, NS, grace_period_seconds=1
+                )
+
 
 @click.command()
 @click.option(
@@ -189,12 +214,15 @@ def main(action, name, source, debian_release, destination, conffs, imginfo, uui
         case "init":
             return create_needed_resources(NS)
         case "create":
-            return create_pod(name, source, debian_release, destination, conffs, imginfo, uuid)
+            return create_pod(
+                name, source, debian_release, destination, conffs, imginfo, uuid
+            )
         case "end":
             return end_pod(name)
         case "cleanup":
             return cleanup(uuid)
         case _:
             eprint(f"Action not defined: {action}")
+
 
 main()

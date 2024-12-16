@@ -1,7 +1,9 @@
 import base64
 import os
 
-first_rootfs_script = f"DEBIAN_APT_GET_PROXY={os.environ.get('DEBIAN_APT_GET_PROXY', '')}" + """
+first_rootfs_script = (
+    f"DEBIAN_APT_GET_PROXY={os.environ.get('DEBIAN_APT_GET_PROXY', '')}"
+    + """
 set -exo pipefail
 
 if [[ -n "$DEBIAN_APT_GET_PROXY" ]]; then
@@ -14,8 +16,11 @@ mkdir -p /mnt/proc /mnt/dev /mnt/sys
 rm -rf /mnt/var/cache/apt/archives/*deb
 tar cf /srv/vauban/rootfs/rootfs.tar -C /mnt .
 """
+)
 
-bash_script = f"DEBIAN_APT_GET_PROXY={os.environ.get('DEBIAN_APT_GET_PROXY', '')}" + """
+bash_script = (
+    f"DEBIAN_APT_GET_PROXY={os.environ.get('DEBIAN_APT_GET_PROXY', '')}"
+    + """
 set -exo pipefail
 FROM_SCRATCH=${FROM_SCRATCH:-false}
 
@@ -32,7 +37,9 @@ function update_linux() {
 
 function run_sshd() {
     mkdir -p /root/.ssh
-""" + f"""echo "{os.environ.get('VAUBAN_KUBERNETES_ENGINE_PUB_KEY')}" >> /root/.ssh/authorized_keys""" + """
+"""
+    + f"""echo "{os.environ.get('VAUBAN_KUBERNETES_ENGINE_PUB_KEY')}" >> /root/.ssh/authorized_keys"""
+    + """
 
     ssh-keygen -A
     echo -e "PermitRootLogin yes\\nPasswordAuthentication no\\nPubkeyAuthentication yes\\nSubsystem sftp /usr/lib/openssh/sftp-server" > /tmp/vauban_sshd
@@ -80,6 +87,7 @@ for i in $(seq 1 3600); do
 done ;
 exit 1
 """
+)
 
 dockerfile_txt = """ARG SOURCE
 FROM $SOURCE
@@ -100,7 +108,12 @@ cm_dockerfile = {
     "apiVersion": "v1",
     "kind": "ConfigMap",
     "metadata": {"name": "vauban-dockerfile"},
-    "data": {"Dockerfile": dockerfile_txt, "Dockerfile_scratch": dockerfile_scratch_txt, "entrypoint.sh": bash_script, "first_rootfs.sh": first_rootfs_script},
+    "data": {
+        "Dockerfile": dockerfile_txt,
+        "Dockerfile_scratch": dockerfile_scratch_txt,
+        "entrypoint.sh": bash_script,
+        "first_rootfs.sh": first_rootfs_script,
+    },
 }
 
 
@@ -118,15 +131,19 @@ def get_pod_kaniko_manifest(name, source, debian_release, tags, in_conffs, uuid)
                         "--dockerfile=./Dockerfile",
                         "--single-snapshot",
                         "--context=dir:///srv/vauban",
-                        ] + ([
-                        "--build-arg",
-                        "SOURCE=" + source ] if source is not None else []) + [
+                    ]
+                    + (
+                        ["--build-arg", "SOURCE=" + source]
+                        if source is not None
+                        else []
+                    )
+                    + [
                         "--build-arg",
                         "IN_CONFFS=" + in_conffs,
                         "--build-arg",
                         "HOST_NAME=" + name,
-                        ] + ["--destination=" + tag for tag in tags]
-                    ,
+                    ]
+                    + ["--destination=" + tag for tag in tags],
                     "volumeMounts": [
                         {"name": "root", "mountPath": "/srv/vauban/rootfs"},
                         {"name": "dockerfile", "mountPath": "/srv/vauban"},
@@ -136,7 +153,12 @@ def get_pod_kaniko_manifest(name, source, debian_release, tags, in_conffs, uuid)
                         },
                     ],
                     "ports": [{"containerPort": 22}],
-                    "env": [{"name": "PATH", "value": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}]
+                    "env": [
+                        {
+                            "name": "PATH",
+                            "value": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                        }
+                    ],
                 }
             ],
             "restartPolicy": "Never",
@@ -145,7 +167,18 @@ def get_pod_kaniko_manifest(name, source, debian_release, tags, in_conffs, uuid)
                     "name": "dockerfile",
                     "configMap": {
                         "name": "vauban-dockerfile",
-                        "items": [{"key": "Dockerfile" if debian_release is None else "Dockerfile_scratch", "path": "Dockerfile"}, {"key": "entrypoint.sh", "path": "entrypoint.sh"}, {"key": "first_rootfs.sh", "path": "first_rootfs.sh"}],
+                        "items": [
+                            {
+                                "key": (
+                                    "Dockerfile"
+                                    if debian_release is None
+                                    else "Dockerfile_scratch"
+                                ),
+                                "path": "Dockerfile",
+                            },
+                            {"key": "entrypoint.sh", "path": "entrypoint.sh"},
+                            {"key": "first_rootfs.sh", "path": "first_rootfs.sh"},
+                        ],
                     },
                 },
                 {
@@ -161,16 +194,17 @@ def get_pod_kaniko_manifest(name, source, debian_release, tags, in_conffs, uuid)
     }
     if debian_release is not None:
         init_container = {
-                        "name": "init",
-                        "image": "debian:12-slim",
-                        "args": [
-                            "bash", "-c",
-                            f"DEBIAN_RELEASE={debian_release} bash /srv/vauban/first_rootfs.sh"
-                        ],
-                        "volumeMounts": [
-                            {"name": "dockerfile", "mountPath": "/srv/vauban"},
-                            {"name": "root", "mountPath": "/srv/vauban/rootfs"},
-                        ]
-                    }
-        pod_kaniko['spec']['initContainers'] = [init_container]
+            "name": "init",
+            "image": "debian:12-slim",
+            "args": [
+                "bash",
+                "-c",
+                f"DEBIAN_RELEASE={debian_release} bash /srv/vauban/first_rootfs.sh",
+            ],
+            "volumeMounts": [
+                {"name": "dockerfile", "mountPath": "/srv/vauban"},
+                {"name": "root", "mountPath": "/srv/vauban/rootfs"},
+            ],
+        }
+        pod_kaniko["spec"]["initContainers"] = [init_container]
     return pod_kaniko

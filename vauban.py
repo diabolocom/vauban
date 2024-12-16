@@ -29,19 +29,24 @@ except (ImportError, ModuleNotFoundError) as e:
 
 
 # Import external module and print an nice error message if module is not found
-for module, module_name in [('yaml', 'pyyaml'), ('click', 'click'), ('requests', 'requests'), ('sentry_sdk', 'sentry-sdk')]:
+for module, module_name in [
+    ("yaml", "pyyaml"),
+    ("click", "click"),
+    ("requests", "requests"),
+    ("sentry_sdk", "sentry-sdk"),
+]:
     try:
         globals()[module] = __import__(module)
-    except ModuleNotFoundError :
-        print(f'Unable to import module: {module_name}')
-        print('Try to install it:')
-        print('- With pip (and optionnal venv)')
-        print('	[Setup your venv] python -m venv venv && source venv/bin/activate')
-        print(f'	pip install --user {module_name}')
-        print('- With your package manager:')
-        print(f'	apt install -y python3-{module_name}')
-        print(f'	pacman -S python-{module}')
-        print(f'	apk add --no-cache py3-{module}')
+    except ModuleNotFoundError:
+        print(f"Unable to import module: {module_name}")
+        print("Try to install it:")
+        print("- With pip (and optionnal venv)")
+        print("	[Setup your venv] python -m venv venv && source venv/bin/activate")
+        print(f"	pip install --user {module_name}")
+        print("- With your package manager:")
+        print(f"	apt install -y python3-{module_name}")
+        print(f"	pacman -S python-{module}")
+        print(f"	apk add --no-cache py3-{module}")
         exit(1)
 SENTRY_DSN = os.environ.get("SENTRY_DSN", None)
 if SENTRY_DSN:
@@ -52,16 +57,19 @@ if SENTRY_DSN:
         traces_sample_rate=1.0,
     )
 
+
 class NothingToDoException(Exception):
     """
     Dummy exception class
     """
+
 
 @dataclass
 class BuildConfig:
     """
     Store build configuration, the cli arguments, as an object
     """
+
     name: str
     stage: str
     branch: str
@@ -80,6 +88,7 @@ class BuildConfig:
         copy.build_parents -= 1
         return copy
 
+
 class MasterNameType(click.ParamType):
     name = "mastername"
 
@@ -90,8 +99,10 @@ class MasterNameType(click.ParamType):
             return []
         return [
             click.shell_completion.CompletionItem(name)
-            for name in config.list_masters() if name.startswith(incomplete)
+            for name in config.list_masters()
+            if name.startswith(incomplete)
         ]
+
 
 class VaubanConfiguration:
     """
@@ -169,6 +180,7 @@ class VaubanMaster:
     """
     Represent a vauban master, with its configuration, a link to its parent, and to its children
     """
+
     def __init__(
         self,
         name: str,
@@ -187,7 +199,7 @@ class VaubanMaster:
         self.branch = value.get("branch", None)
         self.is_release = parent is None
         self.release: str = name if self.is_release else parent.release
-        self.name = value.get('name', name)
+        self.name = value.get("name", name)
         self.configuration: VaubanConfiguration = configuration
         self.output = configuration.output
         for k, v in value.items():
@@ -252,9 +264,12 @@ class VaubanMaster:
             "--name",
             self.name,
             "--upload",
-            "no"
-            if self.is_release or self.name in self.configuration.config["never_upload"]
-            else "yes",
+            (
+                "no"
+                if self.is_release
+                or self.name in self.configuration.config["never_upload"]
+                else "yes"
+            ),
             "--branch",
             branch,
         ]
@@ -280,7 +295,9 @@ class VaubanMaster:
             exec_cmd += "'" + el + "' "
         exec_cmd += f" > >(tee {tmp_path}-stdout) 2> >(tee {tmp_path}-stderr >&2)"
         print(exec_cmd)
-        process = subprocess.run(exec_cmd, check=True, env=my_env, start_new_session=True, shell=True)
+        process = subprocess.run(
+            exec_cmd, check=True, env=my_env, start_new_session=True, shell=True
+        )
         self.output.process(tmp_path)
         assert process.returncode == 0
 
@@ -349,6 +366,8 @@ def conffs(config, vauban_cli, master, only=True):
         except ValueError:
             pass
 
+    stages = config["always_apply_stage_in_conffs"] + stages
+
     vauban_cli += [
         "--conffs",
         "yes",
@@ -405,6 +424,7 @@ STAGES = {
 
 signal.signal(signal.SIGUSR1, lambda a, b: None)
 
+
 @click.command()
 @click.option(
     "--name",
@@ -416,7 +436,8 @@ signal.signal(signal.SIGUSR1, lambda a, b: None)
 @click.option(
     "--stage",
     type=click.Choice(
-        ["rootfs", "conffs", "initramfs", "kernel", "all", "trueall"], case_sensitive=True
+        ["rootfs", "conffs", "initramfs", "kernel", "all", "trueall"],
+        case_sensitive=True,
     ),
     default="all",
     show_default=True,
@@ -460,7 +481,7 @@ signal.signal(signal.SIGUSR1, lambda a, b: None)
     "--conffs",
     default=None,
     show_default=True,
-    help="Override config's conffs for the master to build. Useful to build the conffs for one host or hosts only while keeping a proper config file"
+    help="Override config's conffs for the master to build. Useful to build the conffs for one host or hosts only while keeping a proper config file",
 )
 def vauban(**kwargs):
     """
