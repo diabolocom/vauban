@@ -218,6 +218,7 @@ def status(ulid):
     if (
         status.active is None
         and status.completion_time is None
+        and status.failed is not None
         and status.failed > 0
         and status.ready == 0
     ):
