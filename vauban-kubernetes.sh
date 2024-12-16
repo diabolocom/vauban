@@ -13,7 +13,9 @@ function kubernetes_init_build_engine() {
 }
 
 function kubernetes_cleanup_build_engine() {
-    python3 "$SRC_PATH/kubernetes_controller.py" --action cleanup --uuid "$VAUBAN_KUBERNETES_UUID"
+    if [[ $_arg_kubernetes_no_cleanup != "yes" ]]; then
+        python3 "$SRC_PATH/kubernetes_controller.py" --action cleanup --uuid "$VAUBAN_KUBERNETES_UUID"
+    fi
 }
 
 function kubernetes_prepare_stage_for_host() {

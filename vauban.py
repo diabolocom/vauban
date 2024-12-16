@@ -78,6 +78,7 @@ class BuildConfig:
     config_path: str
     build_parents: int
     conffs: str
+    kubernetes_no_cleanup: bool
 
     def copy(self):
         return deepcopy(self)
@@ -305,6 +306,8 @@ class VaubanMaster:
             "--branch",
             branch,
         ]
+        if cc.kubernetes_no_cleanup:
+            vauban_cli += ["--kubernetes-no-cleanup", "yes"]
 
         if cc.conffs is not None:
             # Override conffs from config.yml
@@ -522,6 +525,12 @@ signal.signal(signal.SIGUSR1, lambda a, b: None)
     default=None,
     show_default=True,
     help="Override config's conffs for the master to build. Useful to build the conffs for one host or hosts only while keeping a proper config file",
+)
+@click.option(
+    "--kubernetes-no-cleanup",
+    default=False,
+    show_default=True,
+    help="Disable automatic cleanup of resources in the end",
 )
 def vauban(**kwargs):
     """

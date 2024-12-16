@@ -136,6 +136,7 @@ vauban_log "recap file: $recap_file"
 # ARG_OPTIONAL_SINGLE([branch],[b],[The name of the ansible branch],[master])
 # ARG_OPTIONAL_SINGLE([ansible-host],[a],[The ansible hosts to generate the config rootfs on. Equivalent to ansible's --limit, but is empty by default],[])
 # ARG_OPTIONAL_SINGLE([build-engine],[e],[The build engine used by vauban. Can be docker, kubernetes],[kubernetes])
+# ARG_OPTIONAL_SINGLE([kubernetes-no-cleanup],[],[Don't cleanup kubernetes resources in the end],[no])
 # ARG_POSITIONAL_INF([stages],[The stages to add to this image, i.e. the ansible playbooks to apply. For example pb_base.yml],[0])
 # ARG_HELP([Build master images and makes coffee])
 # ARGBASH_SET_INDENT([    ])
@@ -158,7 +159,7 @@ die()
 
 begins_with_short_option()
 {
-    local first_option all_short_options='riplufsknbah'
+    local first_option all_short_options='ripludsknbaeh'
     first_option="${1:0:1}"
     test "$all_short_options" = "${all_short_options/$first_option/}" && return 1 || return 0
 }
@@ -178,13 +179,14 @@ _arg_ssh_priv_key="./ansible-ro"
 _arg_name="master-test"
 _arg_branch="master"
 _arg_ansible_host=
-_arg_build_engine=kubernetes
+_arg_build_engine="kubernetes"
+_arg_kubernetes_no_cleanup="no"
 
 
 print_help()
 {
     printf '%s\n' "Build master images and makes coffee"
-    printf 'Usage: %s [-r|--rootfs <arg>] [-i|--initramfs <arg>] [-p|--kernel <arg>] [-l|--conffs <arg>] [-u|--upload <arg>] [-d|--debian-release <arg>] [-s|--source-image <arg>] [-k|--ssh-priv-key <arg>] [-n|--name <arg>] [-b|--branch <arg>] [-a|--ansible-host <arg>] [-h|--help] [<stages-1>] ... [<stages-n>] ...\n' "$0"
+    printf 'Usage: %s [-r|--rootfs <arg>] [-i|--initramfs <arg>] [-p|--kernel <arg>] [-l|--conffs <arg>] [-u|--upload <arg>] [-d|--debian-release <arg>] [-s|--source-image <arg>] [-k|--ssh-priv-key <arg>] [-n|--name <arg>] [-b|--branch <arg>] [-a|--ansible-host <arg>] [-e|--build-engine <arg>] [--kubernetes-no-cleanup <arg>] [-h|--help] [<stages-1>] ... [<stages-n>] ...\n' "$0"
     printf '\t%s\n' "<stages>: The stages to add to this image, i.e. the ansible playbooks to apply. For example pb_base.yml"
     printf '\t%s\n' "-r, --rootfs: Build the rootfs ? (default: 'yes')"
     printf '\t%s\n' "-i, --initramfs: Build the initramfs ? (default: 'yes')"
@@ -197,7 +199,8 @@ print_help()
     printf '\t%s\n' "-n, --name: The name of the image to be built (default: 'master-test')"
     printf '\t%s\n' "-b, --branch: The name of the ansible branch (default: 'master')"
     printf '\t%s\n' "-a, --ansible-host: The ansible hosts to generate the config rootfs on. Equivalent to ansible's --limit, but is empty by default (no default)"
-    printf '\t%s\n' "-a, --build-engine: The build engine used by vauban. Can be docker, kubernetes (default: kubernetes)"
+    printf '\t%s\n' "-e, --build-engine: The build engine used by vauban. Can be docker, kubernetes (default: 'kubernetes')"
+    printf '\t%s\n' "--kubernetes-no-cleanup: Don't cleanup kubernetes resources in the end (default: 'no')"
     printf '\t%s\n' "-h, --help: Prints help"
 }
 
@@ -340,6 +343,14 @@ parse_commandline()
                 ;;
             -e*)
                 _arg_build_engine="${_key##-e}"
+                ;;
+            --kubernetes-no-cleanup)
+                test $# -lt 2 && die "Missing value for the optional argument '$_key'." 1
+                _arg_kubernetes_no_cleanup="$2"
+                shift
+                ;;
+            --kubernetes-no-cleanup=*)
+                _arg_kubernetes_no_cleanup="${_key##--kubernetes-no-cleanup=}"
                 ;;
             -h|--help)
                 print_help
