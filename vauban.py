@@ -162,15 +162,43 @@ class VaubanConfiguration:
 
 
 class OutputHandler:
+    OK_GREEN = '\033[92m'
+    KO_RED = '\033[91m'
+    RESET = '\033[0m'
     def __init__(self):
-        self.logs = ""
+        self._logs = OutputHandler.OK_GREEN
+        self._header = False
 
-    def process(self, path):
+    def get_output(self):
+        return self._logs + OutputHandler.RESET
+
+    def _process(self, content, error=False, error_lines=None):
+        if error:
+            self._logs += OutputHandler.KO_RED
+        lines = content.split("\n")
+        found_separation_line = False
+        for line in lines[1:]:
+            if 'recap file: ' in line:
+                found_separation_line = True
+                continue
+            if found_separation_line or not self._header:
+                self._logs += line + "\n"
+        assert found_separation_line
+        self._header = True
+        if error:
+            self._logs += "".join(error_lines)
+
+
+    def process(self, path, error=False):
         with open(path + "-stdout", "r") as f:
             lines = f.readlines()
+        error_lines = None
+        if error:
+            with open(path + "-stderr", "r") as f:
+                error_lines = f.readlines()
         for line in lines:
             if "recap file: " in line:
-                self.logs += open(line.split("recap file: ")[1].strip()).read()
+                self._process(open(line.split("recap file: ")[1].strip()).read(), error, error_lines)
                 break
         os.remove(path + "-stdout")
         os.remove(path + "-stderr")
@@ -282,6 +310,7 @@ class VaubanMaster:
         vauban_cli = STAGES[cc.stage](self.configuration.config, vauban_cli, self)
 
         my_env = os.environ.copy()
+        my_env["VAUBAN_PRINT_RECAP"] = "no"
         debug_cmd = ""
         if cc.debug:
             my_env["VAUBAN_SET_FLAGS"] = my_env.get("VAUBAN_SET_FLAGS", "") + "x"
@@ -298,9 +327,13 @@ class VaubanMaster:
         if cc.check:
             return
 
-        process = subprocess.run(
-            ["bash", "-c", exec_cmd], check=True, env=my_env, start_new_session=True
-        )
+        try:
+            process = subprocess.run(
+                ["bash", "-c", exec_cmd], check=True, env=my_env, start_new_session=True
+            )
+        except subprocess.CalledProcessError:
+            self.output.process(tmp_path, error=True)
+            raise
         self.output.process(tmp_path)
         assert process.returncode == 0
 
@@ -517,16 +550,16 @@ def vauban(**kwargs):
             sys.exit(1)
     except subprocess.CalledProcessError as e:
         print("Building failed !")
-        print(output.logs)
+        print(output.get_output())
         sys.exit(1)
     except Exception as e:
         exc_info = sys.exc_info()
         traceback.print_exception(*exc_info)
-        print(output.logs)
+        print(output.get_output())
         print()
         print("Building failed !")
         sys.exit(1)
-    print(output.logs)
+    print(output.get_output())
 
     if not cc.debug:
         if cc.stage in ["rootfs", "all", "trueall"]:

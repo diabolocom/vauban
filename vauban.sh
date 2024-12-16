@@ -81,6 +81,7 @@ vauban_log "$NEWLINE$(cat <<"EOF"
 EOF
 )"
 vauban_log "                                $current_date"
+vauban_log "recap file: $recap_file"
     if [[ "$_arg_rootfs" = "yes" ]]; then
         if [[ -n "$_arg_source_image" ]]; then
             prefix_name="$(echo "$_arg_source_image" | cut -d'/' -f1)"

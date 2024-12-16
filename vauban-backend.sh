@@ -377,6 +377,7 @@ function build_initramfs() {
     vauban_log " - initramfs.img created"
     mv "$release_path/initramfs.img" .
     rm -rf "$release_path"
+    upload_list="$upload_list initramfs.img vmlinuz-default"
 }
 
 function upload() {
@@ -388,26 +389,12 @@ function upload() {
     kernel_version="${2:-}"
     upload_list="${3:-}"
     vauban_log "Starting uploading resources"
-    if [[ -z "$upload_list" ]]; then
-        # FIXME handle initramfs & empty arg
-        if [[ $_arg_initramfs = "yes" ]]; then
-            upload_list="initramfs.img vmlinuz-default"
-        fi;
-        if [[ $_arg_kernel = "yes" ]]; then
-            upload_list="vmlinuz"
-        fi;
-
-        # if still empty, send everything
-        if [[ -z "$upload_list" ]]; then
-            upload_list="initramfs.img vmlinuz rootfs.tgz $BUILD_PATH/conffs-*.tgz vmlinuz-default"
-        fi;
-    fi;
     must_symlink=0
     for file in $upload_list; do
         if [[ "$file" == "vmlinuz" ]] || [[ "$file" == "initramfs.img" ]] || [[ "$file" == "vmlinuz-default" ]]; then
             if [[ -z "$kernel_version" ]]; then
                 echo kernel_version not defined and to be used for "$file". Aborting
-                exit 1
+                end 1
             fi
             remote_file="$file-$kernel_version"
             vauban_log " - Uploading $file"

@@ -135,7 +135,7 @@ function end() {
         if [[ -z "$return_code" ]] || [[ "$return_code" == "0" ]]; then
             print_recap "$return_code"
         fi
-        cat "$STACKTRACE_FILE"
+        cat "$STACKTRACE_FILE" >&2
         cleanup
     fi
     [[ -z "$return_code" ]] || exit "$return_code"
@@ -363,7 +363,6 @@ function print_recap() {
         echo "================================================="
         echo "================= RECAP ========================="
         echo "================================================="
-        echo "recap file: $recap_file"
         echo ""
         cat "$recap_file" || true
     fi
