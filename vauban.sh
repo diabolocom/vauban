@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# shellcheck disable=SC2029
+
 # Building images with dracut and docker
 
 set -eTEo pipefail
