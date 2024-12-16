@@ -40,9 +40,8 @@ function stacktrace {
    done
 }
 
-function catch_err() {
+function send_sentry() {
     triggered_cmd="$previous_command"
-    if [[ "$VAUBAN_SET_FLAGS" = *"x"* ]]; then sleep 30 || true; fi
     UPLOAD_CI_SSH_KEY=*** UPLOAD_CREDS=*** VAULTED_SSHD_KEYS_KEY=*** REGISTRY_PASSWORD=*** sentry-cli send-event \
         -m "'$triggered_cmd': return code $1 on line $2" \
         -t conffs:"${_arg_conffs:-}" \
@@ -59,6 +58,10 @@ function catch_err() {
         -a "$(stacktrace)" \
         -t user_sudo:"${SUDO_USER:-${USER:-undefined}}" \
         --logfile "$recap_file" || echo Could not send sentry event 1>&2
+}
+
+function catch_err() {
+    send_sentry $@
     kill -10 $$
     exit 0
 }
@@ -299,7 +302,7 @@ function docker() {
         echo "$REGISTRY_PASSWORD" | $real_docker login "$REGISTRY_HOSTNAME" --username "$REGISTRY_USERNAME" --password-stdin
     fi
 
-    $real_docker "$@"
+    $real_docker "$@" || $real_docker "$@" || $real_docker "$@" || $real_docker "$@"
     local ret="$?"
 
     img_name=""
@@ -325,8 +328,10 @@ function docker() {
         echo "Tagging docker image with $REGISTRY/$img_name and pushing it"
         $real_docker tag "$img_name" "$REGISTRY/$img_name:$current_date"
         $real_docker tag "$img_name" "$REGISTRY/$img_name:latest"
-        $real_docker push "$REGISTRY/$img_name:$current_date"
-        $real_docker push "$REGISTRY/$img_name:latest"
+        $real_docker push "$REGISTRY/$img_name:$current_date" || \
+            $real_docker push "$REGISTRY/$img_name:$current_date"
+        $real_docker push "$REGISTRY/$img_name:latest" || \
+            $real_docker push "$REGISTRY/$img_name:latest"
         echo "Pushed"
 
     fi
@@ -367,6 +372,7 @@ else
 fi
 vauban_start_time="$(date --iso-8601=seconds)"
 recap_file="$vauban_log_path/vauban-recap-$vauban_start_time"
+ansible_recap_file="$vauban_log_path/vauban-ansible-recap-$vauban_start_time"
 
 function init_log() {
     mkdir -p "$vauban_log_path"

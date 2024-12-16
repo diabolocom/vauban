@@ -17,7 +17,7 @@ function prepare_stage_for_host() {
     local source="$3"
     local branch="$4"
     local container_id
-    local timeout=60
+    local timeout=600
 
     # Let's make sure we work on the new container
     $real_docker container stop "$host" > /dev/null 2>&1 || true
@@ -29,14 +29,14 @@ function prepare_stage_for_host() {
                 container_id="$id"
                 if ! $real_docker rename "$container_id" "$host"; then
                     echo "Failed to rename container $container_id. Aborting"
-                    end 1
+                    exit 1
                 fi
                 break 2
             fi
         done
         if [[ "$i" == "$((timeout - 1))" ]]; then
             echo "Waited to find our container for too long. Aborting .."
-            end 1
+            exit 1
         fi
         sleep 0.5
     done
@@ -71,7 +71,7 @@ function prepare_stage_for_host() {
         fi
         if [[ "$i" == "$((timeout - 1))" ]]; then
             echo "Waited for our container to be ready for too long. Aborting .."
-            end 1
+            exit 1
         fi
         sleep 0.5
     done
@@ -123,7 +123,9 @@ function apply_stage() {
             local_source_name="$source_name"
         fi
         docker image inspect "$local_source_name" > /dev/null 2>&1 || pull_image "$local_source_name"
-        { set -x; trap - ERR;
+        { set -x; trap 'send_sentry $? $LINENO' ERR;
+            trap - SIGUSR1;
+            trap 'previous_command=${this_command:-}; this_command=$BASH_COMMAND' DEBUG;
             docker build \
                 --build-arg SOURCE="${local_source_name}" \
                 --build-arg PLAYBOOK="${local_pb}" \
@@ -135,7 +137,9 @@ function apply_stage() {
         } > "$vauban_log_path/vauban-docker-build-${vauban_start_time}/${host}.log" 2>&1 &
         pids_docker_build+=("$!")
         hosts_built+=("$host")
-        { set -x; trap - ERR;
+        { set -x; trap send_sentry ERR;
+            trap - SIGUSR1;
+            trap 'previous_command=${this_command:-}; this_command=$BASH_COMMAND' DEBUG;
             prepare_stage_for_host "$host" "$local_pb" "$local_source_name" "$local_branch"
         } > "$vauban_log_path/vauban-prepare-stage-${vauban_start_time}/${host}.log" 2>&1 &
         pids_prepare_stage+=("$!")
@@ -155,14 +159,15 @@ function apply_stage() {
     echo "Done with HOOK_PRE_ANSIBLE"
 
     echo "Running ansible-playbook"
-    if eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c community.docker.docker_api -v $ANSIBLE_EXTRA_ARGS | tee -a "$recap_file" ; then
+    if eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c community.docker.docker_api -v $ANSIBLE_EXTRA_ARGS | tee -a "$ansible_recap_file" ; then
         file_to_touch=/tmp/stage-built
     else
         file_to_touch=/tmp/stage-failed
     fi
+    tail -n 50 $ansible_recap_file >> $recap_file
     echo "Done with ansible-playbook. Signaling state=$(basename "$file_to_touch")"
     for host in $hosts; do
-        docker exec "$host" touch "$file_to_touch"
+        $real_docker exec "$host" touch "$file_to_touch"
     done
 
     echo "Running HOOK_POST_ANSIBLE"
