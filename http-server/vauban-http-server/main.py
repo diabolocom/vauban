@@ -59,6 +59,7 @@ def help():
                 conffs: Override config.yml's conffs argument
                 extra-args: Extra arguments to give to vauban.py, as a str
                 vauban-image: Docker image to use for Vauban. Impacts config.yml
+                no-cleanup: Don't cleanup Kubernetes resources automatically (/delete API route still works)
             returns: Object containing `status` and possibly a `job_ulid` if job got accepted
         /status/<ulid>
             method: GET
@@ -91,7 +92,7 @@ def build():
             jsonify(
                 {
                     "status": "error",
-                    "message": f"Need some more arguments. missing: {e}\n",
+                    "message": f"Need some more arguments. missing: {e}",
                 }
             ),
             400,
@@ -103,6 +104,14 @@ def build():
     if "extra-args" in args:
         vauban_cli += [args["extra-args"]]
         notif_infos |= {"extra-args": args["extra-args"]}
+    if "no-cleanup" in args and args["no-cleanup"].lower() in [
+        "true",
+        "yes",
+        "on",
+        "1",
+    ]:
+        vauban_cli += ["--kubernetes-no-cleanup"]
+        notif_infos |= {"kubernetes no cleanup": "yes"}
     # FIXME make it configurable
     manifest = get_vauban_job(
         ulid,

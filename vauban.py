@@ -528,6 +528,7 @@ signal.signal(signal.SIGUSR1, lambda a, b: None)
 )
 @click.option(
     "--kubernetes-no-cleanup",
+    is_flag=True,
     default=False,
     show_default=True,
     help="Disable automatic cleanup of resources in the end",
