@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import hashlib
 import yaml
 import requests
+import logging
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.triggers.cron import CronTrigger
@@ -23,6 +24,10 @@ config_hash = None
 job_defaults = {"coalesce": True, "max_instances": 1, "misfire_grace_time": None}
 executors = {"default": ThreadPoolExecutor(20)}
 scheduler = BlockingScheduler(job_defaults=job_defaults, executors=executors)
+logging.basicConfig(
+    level=logging.INFO, format="[%(asctime)s][%(levelname)-8s] %(message)s"
+)
+logger = logging.getLogger()
 
 
 @dataclass
@@ -75,13 +80,13 @@ def watch_change(first_call=False):
     except Exception as e:
         if first_call:
             raise
-        print(f"Error while trying to get updates: {e}")
+        logger.error(f"Error while trying to get updates: {e}")
         return
-    print(f"Configuration hash {new_hash}")
+    logger.info(f"Configuration hash {new_hash}")
     if config_hash is None:
         config_hash = new_hash
     if config_hash != new_hash or first_call:
-        print("Configuration changed, changing the jobs")
+        logger.info("Configuration changed, changing the jobs")
         build_list = get_all_masters_with_schedule(raw_txt=content)
         for job in scheduler.get_jobs():
             job.remove()
@@ -111,7 +116,7 @@ def schedule_builds(scheduler, build_list):
         max_cron_len = max(max_cron_len, len(build_info.schedule))
     for build_info in build_list:
         cron_expression = parse_cron(build_info.schedule)
-        print(
+        logger.info(
             f"Add cron job to build {build_info.name : >{max_master_len}} on {build_info.schedule : >{max_cron_len}} (args: {build_info.schedule_options})"
         )
         scheduler.add_job(
@@ -127,7 +132,7 @@ def schedule_all(scheduler, build_list):
 
 
 def build(master, schedule_options):
-    print(f"building master {master}")
+    logger.info(f"building master {master}")
     env = os.environ | {
         "VAUBAN_CLIENT_USER_AGENT": "vauban scheduler via vauban-client"
     }
@@ -145,10 +150,10 @@ def build(master, schedule_options):
             env=env,
             check=True,
         )
-        print(f"finished building master {master}")
+        logger.info(f"finished building master {master}")
     except subprocess.CalledProcessError as e:
         sentry_sdk.capture_exception(e)
-        print(f"failed to build master {master}")
+        logger.warning(f"failed to build master {master}")
 
 
 def main():
