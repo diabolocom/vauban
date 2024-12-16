@@ -116,8 +116,8 @@ class SlackNotif:
                 "update-in-progress": ":large_blue_circle: Job is running ... :elpepehacker:",
                 "update-error": ":red_circle: Job failed :pepebad:",
                 "update-done": ":large_green_circle: Job built ! :pepeok::pepeelnosabe:",
-                "update-broken": ":large_purple_cirle: Job in unknown state :pepe_rage:",
-                "update-garbage-collected": ":large_purple_cirle: Job was interrupted :pepegun:",
+                "update-broken": ":large_purple_circle: Job in unknown state :pepe_rage:",
+                "update-garbage-collected": ":large_purple_circle: Job was interrupted :pepegun:",
             }
             return progresses[event_type]
 
@@ -136,7 +136,7 @@ class SlackNotif:
             "job_infos": [{"key": k, "value": v} for k, v in infos.items()],
             "job_tracking_progress": (
                 get_tracking_progress(previous_event_type)
-                if event_type != "update-garbage-collected"
+                if event_type == "update-garbage-collected"
                 and previous_event_type not in ["update-in-progress", "creation"]
                 else get_tracking_progress(event_type)
             ),
