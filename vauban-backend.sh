@@ -197,6 +197,11 @@ function apply_stage() {
 
     echo "Done with ansible for the stage $stage. Waiting for each container to wrap up, signaling status=$status ..."
     for host in $hosts; do
+        if [[ "$add_host_to_prefix" == "yes" ]]; then
+            local_prefix="$prefix_name/$host"
+        else
+            local_prefix="$prefix_name"
+        fi
         { set -x; trap send_sentry ERR;
             trap - SIGUSR1;
             trap 'previous_command=${this_command:-}; this_command=$BASH_COMMAND' DEBUG;
