@@ -1,6 +1,6 @@
-FROM docker:dind
+FROM python:3.12-alpine3.20
 
-WORKDIR /srv
+WORKDIR /tmp
 
 COPY requirements.txt requirements.txt
 
@@ -10,8 +10,6 @@ ADD https://releases.hashicorp.com/vault/${VERSION}/vault_${VERSION}_linux_amd64
 ADD https://releases.hashicorp.com/vault/${VERSION}/vault_${VERSION}_SHA256SUMS      /tmp/
 ADD https://releases.hashicorp.com/vault/${VERSION}/vault_${VERSION}_SHA256SUMS.sig  /tmp/
 
-WORKDIR /tmp/
-
 RUN apk --update add --virtual verify gpgme \
  && gpg --keyserver keyserver.ubuntu.com --recv-key 0x72D7468F \
  && gpg --verify /tmp/vault_${VERSION}_SHA256SUMS.sig \
@@ -19,15 +17,16 @@ RUN apk --update add --virtual verify gpgme \
  && cat vault_${VERSION}_SHA256SUMS | grep linux_amd64 | sha256sum -c \
  && unzip vault_${VERSION}_linux_amd64.zip \
  && mv vault /usr/local/bin/ \
+ && apk del busybox \
+ && apk add --no-cache py3-yaml bash squashfs-tools git ansible openssh-client coreutils binutils findutils jq \
+    grep file make gpg gpg-agent util-linux xxhash curl vim \
+    py3-click py3-jmespath tar skopeo htop jo debootstrap rsync \
+ && pip install --break-system-packages -r requirements.txt \
+ && curl -sL https://sentry.io/get-cli/ | bash \
  && rm -rf /tmp/* \
  && rm -rf /var/cache/apk/*
 
 WORKDIR /srv
-
-RUN apk del busybox && \
-    apk add --no-cache python3 py3-yaml bash squashfs-tools git ansible openssh-client coreutils binutils findutils jq grep file make gpg gpg-agent util-linux xxhash curl vim && \
-    apk add --no-cache py3-pip py3-click py3-jmespath tar skopeo htop jo debootstrap rsync && \
-    pip install --break-system-packages -r requirements.txt
 
 ARG VAUBAN_SHA1
 
