@@ -52,6 +52,13 @@ def wait_for_and_get_running_pod(namespace, name):
     while (datetime.now(UTC) - start).seconds < 600:
         pod = api_instance.read_namespaced_pod(name=name, namespace=namespace)
         if pod.status.phase == "Failed":
+            logs = api_instance.read_namespaced_pod_log(
+                name=name, namespace=namespace, tail_lines=20
+            )
+            print(f"Logs from Pod {name}:")
+            print(logs)
+            print(f"Status from Pod {name}:")
+            print(pod.status)
             raise RuntimeError("Pod is in Error/Failed status")
         if pod.status.phase == "Succeeded":
             raise RuntimeError("Pod finished before expectations")

@@ -96,33 +96,48 @@ def build():
         args.get("vauban-image", "zarakailloux/vauban:latest"),
         [str(e) for e in vauban_cli],
     )
-
-    try:
-        batch_api_instance.create_namespaced_job(namespace, manifest)
-    except ApiException as e:
-        capture_exception(e)
+    for _ in range(10):
+        ex = None
+        try:
+            batch_api_instance.create_namespaced_job(namespace, manifest)
+            break
+        except ApiException as e:
+            ex = e
+            time.sleep(0.2)
+    else:
+        capture_exception(ex)
         return (
-            jsonify({"status": "error", "message": f"Failed to run a new job: {e}\n"}),
+            jsonify({"status": "error", "message": f"Failed to run a new job: {ex}\n"}),
             500,
         )
     slack_notif.create_notification(
         ulid, notif_infos, {"source": os.environ.get("HOSTNAME", "undefined")}
     )
-    for i in range(100):
+
+    err_count = 0
+    ex = None
+    while i < 100 and err_count < 3:
+        i += 1
         try:
             batch_api_instance.read_namespaced_job(f"vauban-{ulid.lower()}", namespace)
+            break
         except ApiException as e:
+            ex = e
             if str(e.status) == "404":
                 time.sleep(0.2)
                 continue
-            capture_exception(e)
-            return (
-                jsonify(
-                    {"status": "error", "message": f"Failed to get the new job: {e}\n"}
-                ),
-                500,
-            )
-        break
+            err_count += 1
+            if err_count != 3:
+                time.sleep(0.2)
+
+    if (err_count == 3 or i >= 99) and ex is not None:
+        capture_exception(ex)
+        return (
+            jsonify(
+                {"status": "error", "message": f"Failed to get the new job: {ex}\n"}
+            ),
+            500,
+        )
 
     return jsonify({"status": "ok", "job_ulid": ulid})
 
@@ -181,14 +196,22 @@ def _status(ulid):
     """
     Returns the current status of a build job, and update slack's message
     """
-    try:
-        api_response = batch_api_instance.read_namespaced_job(
-            f"vauban-{ulid.lower()}", namespace
-        )
-    except ApiException as e:
-        if str(e.status) == "404":
-            return jsonify({"status": "error", "message": "Cannot find such job"}), 404
-        capture_exception(e)
+    for _ in range(10):
+        ex = None
+        try:
+            api_response = batch_api_instance.read_namespaced_job(
+                f"vauban-{ulid.lower()}", namespace
+            )
+        except ApiException as e:
+            ex = e
+            if str(e.status) == "404":
+                return (
+                    jsonify({"status": "error", "message": "Cannot find such job"}),
+                    404,
+                )
+            time.sleep(0.2)
+    else:
+        capture_exception(ex)
         return (
             jsonify(
                 {"status": "error", "message": f"Error while trying to get jod: {e}"}
