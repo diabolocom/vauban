@@ -108,13 +108,14 @@ function send_sentry() {
 
 STACKTRACE_FILE="$(mkdir -p /tmp/vauban > /dev/null && mktemp -p /tmp/vauban/)"
 function catch_err() {
-    stacktrace_msg="$(stacktrace 2>&1)"
-    send_sentry "$1" "$stacktrace_msg"
-    if [[ -n ${2:-} ]]; then
-        tail -n 15 "$2" >> "$STACKTRACE_FILE"
+    if [[ "${ANSIBLE_PLAYBOOK_RUNNING:-false}" == "false" ]]; then
+        stacktrace_msg="$(stacktrace 2>&1)"
+        send_sentry "$1" "$stacktrace_msg"
+        if [[ -n ${2:-} ]]; then
+            tail -n 15 "$2" >> "$STACKTRACE_FILE"
+        fi
+        echo -e "$stacktrace_msg" >> "$STACKTRACE_FILE"
     fi
-    echo -e "$stacktrace_msg" >> "$STACKTRACE_FILE"
-
     if [[ "$$" == "$BASHPID" ]]; then
         end 1
     else
@@ -135,7 +136,13 @@ function end() {
         if [[ -z "$return_code" ]] || [[ "$return_code" == "0" ]]; then
             print_recap "$return_code"
         fi
-        cat "$STACKTRACE_FILE" >&2
+
+        if [[ "${ANSIBLE_PLAYBOOK_RUNNING:-false}" == "true" ]]; then
+            vauban_log "   - ansible-playbook failed !"
+            tail -n 30 "$ansible_recap_file" >&2
+        else
+            cat "$STACKTRACE_FILE" >&2
+        fi
         cleanup
     fi
     [[ -z "$return_code" ]] || exit "$return_code"

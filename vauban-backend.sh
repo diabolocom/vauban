@@ -4,6 +4,8 @@
 
 set -eEuo pipefail
 
+ANSIBLE_PLAYBOOK_RUNNING="false"
+
 function prepare_stage_for_host() {
     "${_arg_build_engine}"_prepare_stage_for_host "$@"
 }
@@ -115,8 +117,10 @@ function apply_stage() {
 
     vauban_log "   - Running ansible-playbook"
 
+    ANSIBLE_PLAYBOOK_RUNNING="true"
     # shellcheck disable=SC2086 # Intended splitting
     eval ansible-playbook --forks 200 "$local_pb" --diff -l "${hosts// /,}" -c "$ansible_connection_module" -v -e \''{"in_vauban": True, "in_conffs_build": '\''"$(to_boolean is_conffs)"'\''}'\' $ANSIBLE_EXTRA_ARGS 2>&1 | tee -a "$ansible_recap_file"
+    ANSIBLE_PLAYBOOK_RUNNING="false"
 
     eval "$HOOK_POST_ANSIBLE"
 

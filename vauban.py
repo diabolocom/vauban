@@ -162,9 +162,10 @@ class VaubanConfiguration:
 
 
 class OutputHandler:
-    OK_GREEN = '\033[92m'
-    KO_RED = '\033[91m'
-    RESET = '\033[0m'
+    OK_GREEN = "\033[92m"
+    KO_RED = "\033[91m"
+    RESET = "\033[0m"
+
     def __init__(self):
         self._logs = OutputHandler.OK_GREEN
         self._header = False
@@ -178,7 +179,7 @@ class OutputHandler:
         lines = content.split("\n")
         found_separation_line = False
         for line in lines[1:]:
-            if 'recap file: ' in line:
+            if "recap file: " in line:
                 found_separation_line = True
                 continue
             if found_separation_line or not self._header:
@@ -187,7 +188,6 @@ class OutputHandler:
         self._header = True
         if error:
             self._logs += "".join(error_lines)
-
 
     def process(self, path, error=False):
         with open(path + "-stdout", "r") as f:
@@ -198,7 +198,11 @@ class OutputHandler:
                 error_lines = f.readlines()
         for line in lines:
             if "recap file: " in line:
-                self._process(open(line.split("recap file: ")[1].strip()).read(), error, error_lines)
+                self._process(
+                    open(line.split("recap file: ")[1].strip()).read(),
+                    error,
+                    error_lines,
+                )
                 break
         os.remove(path + "-stdout")
         os.remove(path + "-stderr")
