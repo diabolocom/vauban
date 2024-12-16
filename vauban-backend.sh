@@ -61,7 +61,6 @@ function prepare_stage_for_host() {
     $real_docker exec "$id" bash -c "echo -e $imginfo_update | base64 -d >> /imginfo"
     echo -e "\n[all]\n$host\n" >> ansible/${ANSIBLE_ROOT_DIR:-.}/inventory
 
-    timeout=180  # The readiness stage for the container may include a kernel update.
     # This takes time
 
     for i in $(seq 1 $timeout); do
