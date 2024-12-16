@@ -88,7 +88,7 @@ def build():
         "on",
         "1",
     ]:
-        vauban_cli += ["--kubernetes-no-cleanup"]
+        vauban_cli += ["--kubernetes-no-cleanup", "||", "sleep", str(60 * 60 * 24)]
         notif_infos |= {"kubernetes no cleanup": "yes"}
     # FIXME make it configurable
     manifest = get_vauban_job(
