@@ -11,7 +11,7 @@ if [[ -n "$DEBIAN_APT_GET_PROXY" ]]; then
 fi
 apt-get update
 apt-get install -y debootstrap tar
-http_proxy=$DEBIAN_APT_GET_PROXY https_proxy=$DEBIAN_APT_GET_PROXY debootstrap --include=debconf-utils,openssh-client,openssl,openssh-server,sudo,python3,bash-completion,unattended-upgrades,xz-utils,file,curl,ca-certificates --exclude apparmor,ifupdown --merged-usr "$DEBIAN_RELEASE" "/mnt"
+http_proxy=$DEBIAN_APT_GET_PROXY https_proxy=$DEBIAN_APT_GET_PROXY debootstrap --include=debconf-utils,openssh-client,openssl,openssh-server,sudo,python3,bash-completion,unattended-upgrades,xz-utils,file,curl,ca-certificates --exclude apparmor,ifupdown "$DEBIAN_RELEASE" "/mnt"
 mkdir -p /mnt/proc /mnt/dev /mnt/sys
 rm -rf /mnt/var/cache/apt/archives/*deb
 tar cf /srv/vauban/rootfs/rootfs.tar -C /mnt .

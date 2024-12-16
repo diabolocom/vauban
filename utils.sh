@@ -220,7 +220,7 @@ function prepare_debian_release() {
     fi
     mkdir -p "$release_path" "$DEBIAN_CACHE_PATH"
     vauban_log " - Running debootstrap"
-    http_proxy=$DEBIAN_APT_GET_PROXY https_proxy=$DEBIAN_APT_GET_PROXY debootstrap --cache-dir="$DEBIAN_CACHE_PATH" --include=curl,ca-certificates,xz-utils,console-setup --extra-suites="${_arg_debian_release}"-proposed-updates --merged-usr "$_arg_debian_release" "$release_path"
+    http_proxy=$DEBIAN_APT_GET_PROXY https_proxy=$DEBIAN_APT_GET_PROXY debootstrap --cache-dir="$DEBIAN_CACHE_PATH" --include=curl,ca-certificates,xz-utils,console-setup --extra-suites="${_arg_debian_release}"-proposed-updates "$_arg_debian_release" "$release_path"
     bootstrap_release "$release_path"
     vauban_log " - Debian release prepared"
 }

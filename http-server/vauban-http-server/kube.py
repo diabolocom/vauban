@@ -8,8 +8,8 @@ kind: Job
 metadata:
   name: vauban-{ulid.lower()}
 spec:
-  activeDeadlineSeconds: 7200
-  ttlSecondsAfterFinished: 3600
+  activeDeadlineSeconds: 10800  # 3 hours
+  ttlSecondsAfterFinished: 86400  # a day
   template:
     metadata:
       labels:
@@ -22,6 +22,8 @@ spec:
         env:
           - name: PYTHONUNBUFFERED
             value: "1"
+          - name: VAUBAN_BUILD_JOB_ULID
+            value: "{ulid}"
         volumeMounts:
           - mountPath: "/opt/vauban"
             name: secrets
