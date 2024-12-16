@@ -2,7 +2,7 @@
 
 from slack_sdk import WebClient
 import os
-from sentry_sdk import capture_exception
+from sentry_sdk import capture_exception, set_context
 from slack_sdk.errors import SlackApiError
 from jinja2 import Environment, BaseLoader
 from datetime import datetime
@@ -59,6 +59,8 @@ blocks_tpl = """
 {% endfor %}
 """
 
+ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
 
 class SlackNotif:
     def _get_channel_id(self):
@@ -112,13 +114,12 @@ class SlackNotif:
             progresses = {
                 "creation": ":large_yellow_circle: Waiting for the Kubernetes resources to be created ... :pepehmmm:",
                 "update-in-progress": ":large_blue_circle: Job is running ... :elpepehacker:",
-                "update-error": ":large_red_circle: Job failed :pepebad:",
+                "update-error": ":red_circle: Job failed :pepebad:",
                 "update-done": ":large_green_circle: Job built ! :pepeok::pepeelnosabe:",
                 "update-broken": ":large_purple_cirle: Job in unknown state :pepe_rage:",
             }
             return progresses[event_type]
 
-        ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
         rtemplate = Environment(loader=BaseLoader).from_string(blocks_tpl)
         context |= {"last update": datetime.now().replace(microsecond=0).isoformat(" ")}
         context |= {
@@ -144,6 +145,7 @@ class SlackNotif:
         assert values["job_infos"] is not None
         assert values["job_infos"] != {}
         data = rtemplate.render(**values)
+        set_context("yaml_to_load", data)
         return yaml.safe_load(data)
 
     def create_notification(self, ulid, infos, context):
@@ -232,15 +234,19 @@ class SlackNotif:
                 logs_raw = fifth_block["text"]["text"]
 
         try:
-            blocks = self._get_blocks(
-                event_type,
-                ulid,
-                slack_msg_infos,
-                logs,
-                slack_msg_context,
-                slack_msg_event_type,
-                logs_raw,
-            )
+            try:
+                blocks = self._get_blocks(
+                    event_type,
+                    ulid,
+                    slack_msg_infos,
+                    logs,
+                    slack_msg_context,
+                    slack_msg_event_type,
+                    logs_raw,
+                )
+            except Exception as e:
+                capture_exception(e)
+                return
             self.client.chat_update(
                 text=f"New Vauban job created: {ulid}",
                 channel=self.channel_id,
@@ -266,14 +272,33 @@ class SlackNotif:
             print(blocks)
             print(e)
             capture_exception(e)
+        return message_ts
 
     def update_in_progress(self, ulid, infos, context, logs):
         return self._update_notification(
             "update-in-progress", ulid, infos, context, logs
         )
 
-    def update_error(self, ulid, infos, context, logs):
-        return self._update_notification("update-error", ulid, infos, context, logs)
+    def update_error(self, ulid, infos, context, logs, lengthy_log_trace=None):
+        ts = self._update_notification("update-error", ulid, infos, context, logs)
+        try:
+            lengthy_log_trace_str = ansi_escape.sub("", "\n".join(lengthy_log_trace))
+            r = self.client.files_upload(
+                channels=self.channel_id,
+                initial_comment="Lengthy logs:",
+                content=lengthy_log_trace_str,
+                filename="logs.txt",
+                filetype="text",
+                title="logs.txt",
+                thread_ts=ts,
+                username=self.username,
+                icon_emoji=self.icon_emoji,
+            )
+            print(r)
+        except SlackApiError as e:
+            print(e)
+            capture_exception(e)
+        return ts
 
     def update_done(self, ulid, infos, context, logs):
         return self._update_notification("update-done", ulid, infos, context, logs)

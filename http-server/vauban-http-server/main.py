@@ -25,6 +25,7 @@ if os.environ.get("SENTRY_DISABLE", "0") != "1":
                 transaction_style="url",
             ),
         ],
+        include_local_variables=True,
         enable_tracing=False,
     )
 else:
@@ -186,13 +187,13 @@ def _get_logs(ulid):
     return {"logs": log_list[-1], "previous_pods_logs": log_list[:-1]}
 
 
-def get_last_five_log_lines(log_objs):
+def get_last_n_log_lines(log_objs, n=5):
     if log_objs is None or log_objs["logs"] is None:
         return None
     if log_objs["logs"]["status"] == "error":
         return []
     if log_objs["logs"]["status"] == "ok":
-        return log_objs["logs"]["logs"].strip().split("\n")[-5:]
+        return log_objs["logs"]["logs"].strip().split("\n")[-n:]
     raise Exception("Code shouldn't be reached")
 
 
@@ -221,11 +222,15 @@ def status(ulid):
         and status.ready == 0
     ):
         slack_notif.update_error(
-            ulid, {"status": "failed"}, {}, get_last_five_log_lines(log_objs)
+            ulid,
+            {"status": "failed"},
+            {},
+            get_last_n_log_lines(log_objs),
+            lengthy_log_trace=get_last_n_log_lines(log_objs, 150),
         )
         return jsonify({"status": "error", "message": "Job failed !"} | log_objs), 500
     if status.active is not None:
-        slack_notif.update_in_progress(ulid, {}, {}, get_last_five_log_lines(log_objs))
+        slack_notif.update_in_progress(ulid, {}, {}, get_last_n_log_lines(log_objs))
         return (
             jsonify(
                 {"status": "in-progress", "message": "Job is currently running"}
@@ -235,14 +240,14 @@ def status(ulid):
         )
     if status.active is None and status.completion_time is not None:
         slack_notif.update_done(
-            ulid, {"status": "built"}, {}, get_last_five_log_lines(log_objs)
+            ulid, {"status": "built"}, {}, get_last_n_log_lines(log_objs)
         )
         return jsonify(
             {"status": "ok", "message": "Job is done ! Build successful"} | log_objs
         )
 
     capture_exception(Exception(status))
-    slack_notif.update_broken(ulid, {}, {}, get_last_five_log_lines(log_objs))
+    slack_notif.update_broken(ulid, {}, {}, get_last_n_log_lines(log_objs))
     return (
         jsonify(
             {"status": "unknown", "message": f"Job in an unknown state: {str(status)}"}
