@@ -9,6 +9,7 @@ from datetime import datetime
 import json
 from flask import request
 import yaml
+import html
 
 blocks_tpl = """
 - type: header
@@ -122,7 +123,7 @@ class SlackNotif:
             "last update user": request.headers.get("X-authentik-username", "undefined")
         }
         if logs_raw is not None:
-            logs_raw = logs_raw.replace("\n", "\n" + (" " * 8))
+            logs_raw = html.unescape(logs_raw.replace("\n", "\n" + (" " * 8)))
         values = {
             "job_tracking_msg": get_tracking_msg(event_type, ulid),
             "job_infos": [{"key": k, "value": v} for k, v in infos.items()],
@@ -219,8 +220,6 @@ class SlackNotif:
         slack_msg_infos |= infos
         slack_msg_context |= context
 
-        print(message)
-        print(message["blocks"][5])
         logs_raw = None
         if event_type == "update-garbage-collected":
             fifth_block = message["blocks"][5]

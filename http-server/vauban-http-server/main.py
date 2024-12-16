@@ -12,8 +12,12 @@ import sentry_sdk
 from sentry_sdk import capture_exception
 from sentry_sdk.integrations.flask import FlaskIntegration
 
+<<<<<<< HEAD
 SENTRY_DSN = os.environ.get("SENTRY_DSN", None)
 if SENTRY_DSN and os.environ.get("SENTRY_DISABLE", "0") != "1":
+=======
+if os.environ.get("SENTRY_DISABLE", "0") != "1":
+>>>>>>> e8ca41a (httpserver: minor fixes in html handling and sentry disab)
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         integrations=[
