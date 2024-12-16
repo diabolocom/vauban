@@ -63,9 +63,13 @@ def wait_for_and_get_running_pod(namespace, name):
         if pod.status.phase == "Succeeded":
             raise RuntimeError("Pod finished before expectations")
         if pod.status.phase == "Running":
-            logs = api_instance.read_namespaced_pod_log(
-                name=name, namespace=namespace, tail_lines=100
-            )
+            try:
+                logs = api_instance.read_namespaced_pod_log(
+                    name=name, namespace=namespace, tail_lines=100
+                )
+            except:
+                time.sleep(1)
+                continue
             for log_el in log_els:
                 if log_el in logs:
                     return pod
