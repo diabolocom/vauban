@@ -80,7 +80,7 @@ def watch_change(first_call=False):
     except Exception as e:
         if first_call:
             raise
-        logger.error(f"Error while trying to get updates: {e}")
+        logger.error(f"Error while trying to get updates: {e}", extra=dict(exception=e))
         return
     logger.info(f"Configuration hash {new_hash}")
     if config_hash is None:
