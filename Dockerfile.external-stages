@@ -6,6 +6,18 @@ ARG HOST_NAME
 ARG IN_CONFFS
 ARG PLAYBOOK
 
+RUN printf 'Package: linux-*-rt-*\nPin: release *\nPin-Priority: -1\n' > /etc/apt/preferences.d/block-kernel-rt && \
+    if [ "${IN_CONFFS:-no}" != "yes" ]; then \
+        echo "Updating linux" && \
+        apt-get update && \
+        apt list --installed 2> /dev/null | grep -E 'linux-(header|image)' | cut -d/ -f1 | xargs apt-mark unhold && \
+        apt-get install -y linux-headers-amd64 linux-image-amd64 && \
+        apt-get autoremove -y && \
+        apt-get purge -y $(apt list --installed 2> /dev/null | grep linux-head | grep -v linux-headers-amd64/ | head -n-2 | cut -f1 -d'/') && \
+        apt-get purge -y $(apt list --installed 2> /dev/null | grep linux-image | grep -v linux-image-amd64/ | head -n-1 | cut -f1 -d'/') && \
+        apt list --installed 2> /dev/null | grep -E 'linux-(header|image)' | cut -d/ -f1 | xargs apt-mark hold ; \
+    fi
+
 RUN echo $(grep $(hostname) /etc/hosts | cut -f1) ${HOST_NAME} >> /etc/hosts && \
     echo ${HOST_NAME} > /etc/hostname && \
     apt list --installed | sed -e 's/stable,stable/stable/g' > /tmp/apt-before && \
@@ -16,16 +28,6 @@ RUN echo $(grep $(hostname) /etc/hosts | cut -f1) ${HOST_NAME} >> /etc/hosts && 
     echo "Began ! Waiting for the stage to end" && \
     bash -c 'for i in $(seq 1 3600); do [[ -f /tmp/stage-built ]] && break ; [[ -f /tmp/stage-failed ]] && exit 1; [[ "$i" == "3599" ]] && exit 1; sleep 1; done' && \
     echo "Stage ended" && \
-    if [ "${IN_CONFFS:-no}" != "yes" ]; then \
-        echo "Updating linux" && \
-        apt-get update && \
-        apt list --installed 2> /dev/null | grep -E 'linux-(header|image)' | cut -d/ -f1 | xargs apt-mark unhold && \
-        apt-get install -y linux-headers-amd64 linux-image-amd64 && \
-        apt-get autoremove -y && \
-        apt-get purge -y $(apt list --installed 2> /dev/null | grep linux-head | grep -v linux-headers-amd64/ | head -n-2 | cut -f1 -d'/') && \
-        apt-get purge -y $(apt list --installed 2> /dev/null | grep linux-image | grep -v linux-image-amd64/ | head -n-1 | cut -f1 -d'/') && \
-        apt list --installed 2> /dev/null | grep -E 'linux-(header|image)' | cut -d/ -f1 | xargs apt-mark hold ; \
-    fi && \
     echo "\n\
     - playbook: ${PLAYBOOK}\n\
       hostname: ${HOST_NAME}\n\
