@@ -1,6 +1,7 @@
 from flask import Flask, session
 from flask import request, jsonify
 import os
+import time
 from kubernetes import client, config, utils
 from kubernetes.client.rest import ApiException
 from kubernetes.stream import stream
@@ -114,6 +115,22 @@ def build():
             jsonify({"status": "error", "message": f"Failed to run a new job: {e}\n"}),
             500,
         )
+    for i in range(100):
+        try:
+            batch_api_instance.read_namespaced_job(f"vauban-{ulid.lower()}", namespace)
+        except ApiException as e:
+            if str(e.status) == "404":
+                time.sleep(0.2)
+                continue
+            capture_exception(e)
+            return (
+                jsonify(
+                    {"status": "error", "message": f"Failed to get the new job: {e}\n"}
+                ),
+                500,
+            )
+        break
+
     return jsonify({"status": "ok", "job_ulid": ulid})
 
 
