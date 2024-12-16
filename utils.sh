@@ -361,7 +361,8 @@ function set_deployed() {
     fi
     "$real_docker" tag "$image:$tag" "$image:deployed"
     echo "Pushing $image:deployed"
-    docker push "$image:deployed"
+    docker push "$image:deployed" || \
+        docker push "$image:deployed"
     echo "Pushed"
 }
 
