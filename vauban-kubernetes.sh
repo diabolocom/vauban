@@ -20,28 +20,12 @@ function kubernetes_cleanup_build_engine() {
 
 function kubernetes_prepare_stage_for_host() {
     local host="$1"
-    local playbook="$2"
-    local source="$3"
-    local branch="$4"
-    local in_conffs="$5"
-    local destination="$6"
-    local final_name="$7"
-    local ansible_sha1 vauban_sha1 imginfo_update pod_ip
+    local source="$2"
+    local in_conffs="$3"
+    local destination="$4"
+    local final_name="$5"
+    local pod_ip
     local extra_dst=""
-
-
-    ansible_sha1="$( (cd ansible; git rev-parse HEAD) )"
-    # shellcheck disable=SC2153
-    vauban_sha1="$(git rev-parse HEAD 2> /dev/null || echo "$VAUBAN_SHA1")"
-    imginfo_update="$(echo -e "\n\
-    - date: $(date --iso-8601=seconds)\n\
-      playbook: ${playbook}\n\
-      hostname: ${host}\n\
-      source: ${source}\n\
-      ansible-sha1: ${ansible_sha1}\n\
-      ansible-branch: ${branch}\n\
-      build-engine: kubernetes\n\
-      vauban-sha1: ${vauban_sha1}\n" | base64 -w0)"
 
     vauban_log "      - Starting Pod for $host"
     if [[ -n "$final_name" ]]; then
@@ -63,6 +47,23 @@ function kubernetes_prepare_stage_for_host() {
 
 function kubernetes_end_stage_for_host() {
     local host="$1"
+    local playbook="$2"
+    local source="$3"
+    local branch="$4"
+    local ansible_sha1 vauban_sha1 imginfo_update
+
+    ansible_sha1="$( (cd ansible; git rev-parse HEAD) )"
+    # shellcheck disable=SC2153
+    vauban_sha1="$(git rev-parse HEAD 2> /dev/null || echo "$VAUBAN_SHA1")"
+    imginfo_update="$(echo -e "\n\
+    - date: $(date --iso-8601=seconds)\n\
+      playbook: ${playbook}\n\
+      hostname: ${host}\n\
+      source: ${source}\n\
+      ansible-sha1: ${ansible_sha1}\n\
+      ansible-branch: ${branch}\n\
+      build-engine: kubernetes\n\
+      vauban-sha1: ${vauban_sha1}\n" | base64 -w0)"
 
     vauban_log "      - Waiting for Pod $host to finish"
     python3 kubernetes_controller.py --name "$host" --action end --imginfo "$imginfo_update"

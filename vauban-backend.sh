@@ -92,7 +92,7 @@ function apply_stage() {
         {
             trap 'set +x; catch_err $?' ERR
             PROCESS_NAME="prepare_stage"
-            prepare_stage_for_host "$host" "$local_pb" "$local_source_name" "$local_branch" "$is_conffs" "$local_prefix/$local_pb" "$local_final_name"
+            prepare_stage_for_host "$host" "$local_source_name" "$is_conffs" "$local_prefix/$local_pb" "$local_final_name"
         } &
         pids_prepare_stage+=("$!")
     done
@@ -130,14 +130,16 @@ function apply_stage() {
     for host in $hosts; do
         if [[ "$is_conffs" == "yes" ]]; then
             local_prefix="$prefix_name/$host"
+            local_source_name="${source_name//HOSTNAME/$host}"
         else
             local_prefix="$prefix_name"
+            local_source_name="$source_name"
         fi
         {
             trap 'set +x; catch_err $?' ERR
             # shellcheck disable=SC2034 # variable is actually used elswhere
             PROCESS_NAME="end_stage"
-            end_stage_for_host "$host" "$local_prefix/$local_pb" "$local_final_name"
+            end_stage_for_host "$host" "$local_pb" "$local_source_name" "$local_branch"
         } &
         pids_end_stage+=("$!")
     done
