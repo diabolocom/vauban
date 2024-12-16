@@ -116,6 +116,7 @@ def build():
 
     err_count = 0
     ex = None
+    i = 0
     while i < 100 and err_count < 3:
         i += 1
         try:
@@ -202,6 +203,7 @@ def _status(ulid):
             api_response = batch_api_instance.read_namespaced_job(
                 f"vauban-{ulid.lower()}", namespace
             )
+            break
         except ApiException as e:
             ex = e
             if str(e.status) == "404":
@@ -214,7 +216,7 @@ def _status(ulid):
         capture_exception(ex)
         return (
             jsonify(
-                {"status": "error", "message": f"Error while trying to get jod: {e}"}
+                {"status": "error", "message": f"Error while trying to get jod: {ex}"}
             ),
             500,
         )
