@@ -264,13 +264,22 @@ def delete(ulid):
             namespace,
             label_selector=f"vauban.corp.dblc.io/vauban-job-id={ulid.upper()}",
         )
-        pods = {}
         if pods_response is not None:
             for pod in pods_response.items:
-                api_response = batch_api_instance.delete_namespaced_job(
+                core_api_instance.delete_namespaced_pod(
                     pod.metadata.name, namespace, propagation_policy="Background"
                 )
-        slack_notif.update_garbage_collected(ulid, {}, {}, None)
+
+        jobs_response = batch_api_instance.list_namespaced_job(
+            namespace,
+            label_selector=f"vauban.corp.dblc.io/vauban-job-id={ulid.upper()}",
+        )
+        if jobs_response is not None:
+            for job in jobs_response:
+                batch_api_instance.delete_namespaced_job(
+                    job.metadata.name, namespace, propagation_policy="Background"
+                )
+
     except ApiException as e:
         if str(e.status) == "404":
             return jsonify({"status": "ok", "message": "Already deleted !"}), 200
@@ -280,6 +289,11 @@ def delete(ulid):
             ),
             500,
         )
+    finally:
+        try:
+            slack_notif.update_garbage_collected(ulid, {}, {}, None)
+        except Exception as e:
+            capture_exception(e)
     return jsonify({"status": "ok", "message": "Deleted !"}), 201
 
 
