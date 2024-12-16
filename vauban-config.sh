@@ -84,3 +84,6 @@ KUBE_NAMESPACE="vauban"
 
 # Debian optional apt-get proxy
 DEBIAN_APT_GET_PROXY=${DEBIAN_APT_GET_PROXY:-}
+
+# Conffs archive max size in byte
+CONFFS_MAX_SIZE=52428800 # 50 Mib

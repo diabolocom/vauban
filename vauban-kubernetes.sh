@@ -224,7 +224,13 @@ function kubernetes_build_conffs_for_host() {
         --exclude "root/ansible" \
         --exclude "root/.ansible" \
         . > /dev/null
+    conffs_archive_size="$(stat -c%s "conffs-$host.tgz")";
+    if [[ "$conffs_archive_size" > $CONFFS_MAX_SIZE ]]; then
+        echo "The conffs archive size is too big. Must be less than $CONFFS_MAX_SIZE. Actual : $conffs_archive_size"
+        exit 1;
+    fi
     )
+
     upload_list="$upload_list $BUILD_PATH/conffs-$host.tgz"
     rm -rf "$dst_path"
 }
