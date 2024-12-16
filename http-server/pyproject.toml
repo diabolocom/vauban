@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "vauban-http-server"
+version = "0.1.0"
+description = ""
+authors = ["Cyril Duval <cyril.duval@diabolocom.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+flask = "^3.0.3"
+kubernetes = "^31.0.0"
+python-ulid = "^2.7.0"
+pyyaml = "^6.0.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

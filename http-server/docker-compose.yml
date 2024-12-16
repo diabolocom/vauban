@@ -1,0 +1,11 @@
+services:
+  vauban-http-server:
+    build: .
+    ports:
+      - 5000:5000
+    container_name: vauban-http-server
+    volumes:
+      - ./vauban-http-server:/app/vauban-http-server
+      # FIXME to your specific home directory
+      # I know it's ugly, I just went for the quick solution at the time
+      - /home/zarak/.kube:/home/app/.kube:ro
