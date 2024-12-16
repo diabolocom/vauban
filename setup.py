@@ -7,6 +7,8 @@ setup(
     install_requires=[
         'Click',
         'pyyaml',
+        'requests',
+        'sentry_sdk',
     ],
     entry_points={
         'console_scripts': [

@@ -155,7 +155,7 @@ function apply_stage() {
     echo "Done with HOOK_PRE_ANSIBLE"
 
     echo "Running ansible-playbook"
-    if eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c community.docker.docker_api -v $ANSIBLE_EXTRA_ARGS; then
+    if eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c community.docker.docker_api -v $ANSIBLE_EXTRA_ARGS | tee -a "$recap_file" ; then
         file_to_touch=/tmp/stage-built
     else
         file_to_touch=/tmp/stage-failed

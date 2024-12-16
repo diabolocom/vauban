@@ -32,8 +32,33 @@ function cleanup() {
     losetup -D > /dev/null 2> /dev/null || true
 }
 
+function stacktrace {
+   local i=1 line file func
+   while read -r line func file < <(caller $i); do
+      echo "[$i] $file:$line $func(): $(sed -n "${line}"p "$file")"
+      ((i++))
+   done
+}
+
 function catch_err() {
+    triggered_cmd="$previous_command"
     if [[ "$VAUBAN_SET_FLAGS" = *"x"* ]]; then sleep 30 || true; fi
+    UPLOAD_CI_SSH_KEY=*** UPLOAD_CREDS=*** VAULTED_SSHD_KEYS_KEY=*** REGISTRY_PASSWORD=*** sentry-cli send-event \
+        -m "'$triggered_cmd': return code $1 on line $2" \
+        -t conffs:"${_arg_conffs:-}" \
+        -t rootfs:"${_arg_rootfs:-}" \
+        -t name:"${_arg_name:-}" \
+        -t stages:"${_arg_stages:-}" \
+        -e this_cmd:"${this_command:-}" \
+        -t kernel:"${_arg_kernel:-}" \
+        -t upload:"${_arg_upload:-}" \
+        -t iso:"${_arg_iso:-}" \
+        -t branch:"${_arg_branch:-}" \
+        -t initramfs:"${_arg_initramfs:-}" \
+        -t source_image:"${_arg_source_image:-}" \
+        -a "$(stacktrace)" \
+        -t user_sudo:"${SUDO_USER:-${USER:-undefined}}" \
+        --logfile "$recap_file" || true
     kill -10 $$
     exit 0
 }
@@ -342,6 +367,7 @@ else
 fi
 vauban_start_time="$(date --iso-8601=seconds)"
 recap_file="$vauban_log_path/vauban-recap-$vauban_start_time"
+: >> $recap_file
 
 function init_log() {
     mkdir -p "$vauban_log_path"

@@ -15,9 +15,17 @@ import hashlib
 import json
 from copy import deepcopy
 from dataclasses import dataclass
+try:
+    import sentry_sdk
+
+except (ImportError, ModuleNotFoundError) as e:
+    if not os.environ.get("_VAUBAN_COMPLETE"):
+        print(e)
+        print("sentry_sdk not found in your environment. Please install sentry_sdk")
+
 
 # Import external module and print an nice error message if module is not found
-for module, module_name in [('yaml', 'pyyaml'), ('click', 'click'), ('requests', 'requests')]:
+for module, module_name in [('yaml', 'pyyaml'), ('click', 'click'), ('requests', 'requests'), ('sentry_sdk', 'sentry-sdk')]:
     try:
         globals()[module] = __import__(module)
     except ModuleNotFoundError :
@@ -31,6 +39,14 @@ for module, module_name in [('yaml', 'pyyaml'), ('click', 'click'), ('requests',
         print(f'	pacman -S python-{module}')
         print(f'	apk add --no-cache py3-{module}')
         exit(1)
+SENTRY_DSN = os.environ.get("SENTRY_DSN", None)
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        # Set traces_sample_rate to 1.0 to capture 100%
+        # of transactions for performance monitoring.
+        traces_sample_rate=1.0,
+    )
 
 class NothingToDoException(Exception):
     """

@@ -2,7 +2,7 @@
 
 # Building images with dracut and docker
 
-set -eEo pipefail
+set -eTEo pipefail
 
 # shellcheck source=vauban-config.sh
 source vauban-config.sh
@@ -13,8 +13,9 @@ source vauban-backend.sh
 
 set "-$VAUBAN_SET_FLAGS"
 
-trap 'catch_err' ERR
+trap 'catch_err $? $LINENO' ERR
 trap 'end 1' SIGUSR1
+trap 'previous_command=${this_command:-}; this_command=$BASH_COMMAND' DEBUG
 
 [ "$(whoami)" != "root" ] && run_as_root
 
