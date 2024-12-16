@@ -19,33 +19,14 @@ function prepare_stage_for_host() {
     local container_id
     local timeout=600
 
-    # Let's make sure we work on the new container
-    docker container stop "$host" > /dev/null 2>&1 || true
-    docker container rm "$host" > /dev/null 2>&1 || true
-
-    for i in $(seq 1 $timeout); do
-        for id in $(docker ps -q); do
-            if [[ "$(timeout 1 docker exec "$id" cat /tmp/stage-identification 2>/dev/null)" == "$host" ]]; then
-                container_id="$id"
-                if ! docker rename "$container_id" "$host"; then
-                    echo "Failed to rename container $container_id. Aborting"
-                    exit 1
-                fi
-                break 2
-            fi
-        done
-        if [[ "$i" == "$((timeout - 1))" ]]; then
-            echo "Waited to find our container for too long. Aborting .."
-            exit 1
-        fi
-        sleep 0.5
-    done
+    container_id="$(docker container inspect $host | jq -r '.[].Id')"
+    container_ip="$(docker container inspect $host | jq -r '.[].NetworkSettings.Networks.bridge.IPAddress')"
 
     if [[ -z ${CI:-} ]]; then
         # Try to make the container nice
         container_pid="$(ps aux | grep "$container_id" | grep -v grep | awk '{ print $2 }')"
-        renice -n 19 -p "$container_pid" > /dev/null 2>&1 || true
-        ionice -c 3 -p "$container_pid" > /dev/null 2>&1 || true
+        ls "/proc/$container_pid/task" | xargs renice -n 19 > /dev/null 2>&1 || true
+        cat /proc/"$container_pid"/task/*/children | xargs renice -n 19 > /dev/null 2>&1 || true
     fi
 
     ansible_sha1="$( (cd ansible; git rev-parse HEAD) )"
@@ -58,13 +39,17 @@ function prepare_stage_for_host() {
       git-sha1: ${ansible_sha1}\n\
       git-branch: ${branch}\n\
       vauban-sha1: ${vauban_sha1}\n" | base64 -w0)"
-    retry 3 timeout 2 docker exec "$id" bash -c "echo -e $imginfo_update | base64 -d >> /imginfo"
+    retry 3 timeout 2 docker exec "$host" bash -c "echo -e $imginfo_update | base64 -d >> /imginfo"
     echo -e "\n[all]\n$host\n" >> ansible/${ANSIBLE_ROOT_DIR:-.}/inventory
 
     # This takes time
 
     for i in $(seq 1 $timeout); do
-        if [[ "$(timeout 1 docker exec "$id" cat /tmp/stage-ready 2>/dev/null)" == "$host" ]]; then
+        if [[ "$(docker inspect "$container_id" | jq '.[].State.Status' -r)" != "running" ]]; then
+            echo "container exited. Aborting .."
+            exit 1
+        fi
+        if [[ "$(timeout 3 curl -m 2 "http://$container_ip:8000/ready" 2>/dev/null)" == "ready" ]]; then
             echo "Our container is ready. Let's signal it that we are ready to pursue as well."
             break
         fi
@@ -74,9 +59,39 @@ function prepare_stage_for_host() {
         fi
         sleep 0.5
     done
+}
 
-    retry 3 timeout 1 docker exec "$id" touch /tmp/stage-begin
-    exit 0
+function end_stage_for_host() {
+    local host="$1"
+    local status="$2"
+    local timeout=60
+
+    if [[ "$(docker inspect "$host" | jq '.[].State.Status' -r)" != "running" ]]; then
+        echo "Container already exited. Aborting .."
+        exit 1
+    fi
+
+    container_ip="$(docker container inspect $host | jq -r '.[].NetworkSettings.Networks.bridge.IPAddress')"
+
+    printf "Container for %s signaled us %s" "$host" "$(retry 3 timeout 3 curl -m 2 http://"$container_ip":8000$status 2> /dev/null)"
+
+    echo "Waiting for container $host to exit"
+    for i in $(seq 1 $timeout); do
+        if [[ "$(docker inspect "$host" | jq '.[].State.Status' -r)" == "exited" ]]; then
+            echo "Container exited. Continuing .."
+            break
+        fi
+        if [[ "$i" == "$((timeout - 1))" ]]; then
+            echo "Our container doesn't want to stop. Aborting .."
+            exit 1
+        fi
+        sleep 0.5
+    done
+    docker commit "$host" "${local_prefix}/${local_pb}"
+    docker_push "${local_prefix}/${local_pb}"
+    docker logs "$host" > "$vauban_log_path/vauban-docker-logs-${vauban_start_time}/${host}.log" 2>&1
+    docker container rm "$host"
+    echo "Docker container commited and pushed. Success !"
 }
 
 function apply_stage() {
@@ -92,11 +107,12 @@ function apply_stage() {
     shift
     hosts=$*
 
-    local pids_docker_build=()
     local pids_prepare_stage=()
+    local pids_end_stage=()
     local hosts_built=()
     local local_prefix=""
     local local_source_name=""
+    local status
 
 
     if [[ "$stage" = *"@"* ]]; then
@@ -123,20 +139,27 @@ function apply_stage() {
             local_source_name="$source_name"
         fi
         docker image inspect "$local_source_name" > /dev/null 2>&1 || pull_image "$local_source_name"
-        { set -x; trap 'send_sentry $? $LINENO' ERR;
-            trap - SIGUSR1;
-            trap 'previous_command=${this_command:-}; this_command=$BASH_COMMAND' DEBUG;
-            docker build \
-                --build-arg SOURCE="${local_source_name}" \
-                --build-arg PLAYBOOK="${local_pb}" \
-                --build-arg HOST_NAME="$host" \
-                --build-arg IN_CONFFS="$in_conffs" \
-                --no-cache \
-                -t "${local_prefix}/${local_pb}" \
-                -f Dockerfile.external-stages .
-            docker_push "${local_prefix}/${local_pb}"
-        } > "$vauban_log_path/vauban-docker-build-${vauban_start_time}/${host}.log" 2>&1 &
-        pids_docker_build+=("$!")
+
+        # Let's make sure we work on the new container
+        docker container stop "$host" > /dev/null 2>&1 || true
+        docker container rm "$host" > /dev/null 2>&1 && echo "!! removed existing container for $host" || true
+        docker run \
+            --name "$host" \
+            --hostname "$host" \
+            --add-host "$host:127.0.0.1" \
+            --add-host "$host:::1" \
+            --env SOURCE="${local_source_name}" \
+            --env PLAYBOOK="${local_pb}" \
+            --env HOST_NAME="$host" \
+            --env IN_CONFFS="$in_conffs" \
+            --volume "$(pwd)"/docker-entrypoint.sh:/docker-entrypoint.sh \
+            --entrypoint /docker-entrypoint.sh \
+            --user root \
+            --detach \
+            --workdir /root \
+            --tty \
+            --tmpfs /tmp \
+            ${local_source_name}
         hosts_built+=("$host")
         { set -x; trap send_sentry ERR;
             trap - SIGUSR1;
@@ -146,7 +169,7 @@ function apply_stage() {
         pids_prepare_stage+=("$!")
     done
 
-    wait_pids "pids_prepare_stage" "hosts_built" "prepare stage"
+    wait_pids "pids_prepare_stage" "hosts_built" "prepare stage $stage"
 
     local current_dir="$(pwd)"
     cd ansible/${ANSIBLE_ROOT_DIR:-.}
@@ -161,24 +184,29 @@ function apply_stage() {
     echo "Done with HOOK_PRE_ANSIBLE"
 
     echo "Running ansible-playbook"
-    if eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c community.docker.docker_api -v $ANSIBLE_EXTRA_ARGS | tee -a "$ansible_recap_file" ; then
-        file_to_touch=/tmp/stage-built
+    if eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c community.docker.docker_api -v -e \''{"in_vauban": True, "in_conffs_build": '\''"$(to_boolean in_conffs)"'\''}'\' $ANSIBLE_EXTRA_ARGS | tee -a "$ansible_recap_file" ; then
+        status=/success
     else
-        file_to_touch=/tmp/stage-failed
+        status=/failed
     fi
-    tail -n 50 $ansible_recap_file >> $recap_file
-    echo "Done with ansible-playbook. Signaling state=$(basename "$file_to_touch")"
-    for host in $hosts; do
-        retry 3 timeout 1 docker exec "$host" touch "$file_to_touch"
-    done
+    tail -n 50 "$ansible_recap_file" >> "$recap_file"
 
     echo "Running HOOK_POST_ANSIBLE"
     eval "$HOOK_POST_ANSIBLE"
     echo "Done with HOOK_POST_ANSIBLE"
 
-    echo "Done with ansible for the stage $stage. Waiting for each container to wrap up ..."
-    wait_pids "pids_docker_build" "hosts_built" "build stage $stage"
+    echo "Done with ansible for the stage $stage. Waiting for each container to wrap up, signaling status=$status ..."
+    for host in $hosts; do
+        { set -x; trap send_sentry ERR;
+            trap - SIGUSR1;
+            trap 'previous_command=${this_command:-}; this_command=$BASH_COMMAND' DEBUG;
+            end_stage_for_host "$host" "$status"
+        } > "$vauban_log_path/vauban-end-stage-${vauban_start_time}/${host}.log" 2>&1 &
+        pids_end_stage+=("$!")
+    done
+    wait_pids "pids_end_stage" "hosts_built" "end stage $stage"
     wait
+
     echo "All build-containers exited"
     cd "$current_dir"
 }

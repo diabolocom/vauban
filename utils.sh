@@ -8,6 +8,15 @@ function run_as_root() {
     exit 1
 }
 
+function to_boolean() {
+    local val="$1"
+    if [[ "$val" == "yes" ]]; then
+        echo True
+    else
+        echo False
+    fi
+}
+
 function cleanup() {
     rm -rf tmp rootfs.img
 
@@ -33,8 +42,9 @@ function cleanup() {
     losetup -D > /dev/null 2> /dev/null || true
 }
 
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]:-.}" )" &> /dev/null && pwd )
 function stacktrace {
-    cd "$(dirname "${BASH_SOURCE:-.}")"
+    cd "$SCRIPT_DIR"
     local i=1 line file func
     while read -r line func file < <(caller $i); do
         echo "[$i] $file:$line $func(): $(sed -n "${line}"p "$file")"
@@ -360,14 +370,15 @@ if [[ -n ${CI:-} ]]; then
 else
     vauban_log_path=/tmp/vauban
 fi
-vauban_start_time="$(date --iso-8601=seconds)"
+vauban_start_time="$(date --iso-8601=seconds | tr : _ | cut -d '+' -f1)"
 recap_file="$vauban_log_path/vauban-recap-$vauban_start_time"
 ansible_recap_file="$vauban_log_path/vauban-ansible-recap-$vauban_start_time"
 
 function init_log() {
-    mkdir -p "$vauban_log_path"
-    mkdir -p "$vauban_log_path/vauban-docker-build-${vauban_start_time}"
-    mkdir -p "$vauban_log_path/vauban-prepare-stage-${vauban_start_time}"
+    mkdir -p "$vauban_log_path" \
+        "$vauban_log_path/vauban-end-stage-${vauban_start_time}" \
+        "$vauban_log_path/vauban-prepare-stage-${vauban_start_time}" \
+        "$vauban_log_path/vauban-docker-logs-${vauban_start_time}"
     : >> $recap_file
 }
 init_log

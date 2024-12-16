@@ -15,7 +15,7 @@ set "-$VAUBAN_SET_FLAGS"
 
 trap 'catch_err $? $LINENO' ERR
 trap 'end 1' SIGUSR1
-trap 'previous_command=${this_command:-}; this_command=$BASH_COMMAND' DEBUG
+trap '{ previous_command=${this_command:-}; this_command=$BASH_COMMAND; } 2> /dev/null' DEBUG
 
 [ "$(whoami)" != "root" ] && run_as_root
 
