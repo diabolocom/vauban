@@ -218,6 +218,12 @@ function vault_put_sshd_keys() {
     echo "$keys_algos" | jq -c '.[]' | while read -r keys_algo; do
         type="$(echo "$keys_algo" | jq -r .type)"
         size="$(echo "$keys_algo" | jq -r .size)"
+
+        if [[ -z "${VAULT_TOKEN}" ]]; then
+          VAULT_TOKEN="$(vault write --field=token auth/approle/login "role_id=${VAULT_ROLE_ID}" "secret_id=${VAULT_SECRET_ID}")"
+          export VAULT_TOKEN
+        fi
+
         kv_out="$(vault kv get -format json "$VAULT_PATH"sshd/"$host"/"$type" 2>/dev/null | jq .data.data || true)"
         key_name="ssh_host_${type}_key"
         if [[ -z "$kv_out" ]]; then

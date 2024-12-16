@@ -41,6 +41,8 @@ VAULTED_SSHD_KEYS_KEY="${VAULTED_SSHD_KEYS_KEY:-}"
 ## hashicorp vault
 VAULT_ADDR="${VAULT_ADDR:-}"
 VAULT_TOKEN="${VAULT_TOKEN:-}"
+VAULT_ROLE_ID="${VAULT_ROLE_ID:-}"
+VAULT_SECRET_ID="${VAULT_SECRET_ID:-}"
 VAULT_PATH=vauban_kv2/
 
 # Git authentication details to automatically commit and push ssh keys generated
