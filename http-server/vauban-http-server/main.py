@@ -162,6 +162,8 @@ def _get_logs(ulid):
             error_msg = f"Error while getting pod logs: {e}"
             log_obj = {"status": "error", "message": error_msg}
         log_list.append(log_obj)
+    if log_list is None or len(log_list) == 0:
+        return {"logs": None, "previous_pods_logs": []}
     return {"logs": log_list[-1], "previous_pods_logs": log_list[:-1]}
 
 
