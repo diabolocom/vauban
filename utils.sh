@@ -224,7 +224,7 @@ function prepare_debian_release() {
     if [[ "$_arg_debian_release" == "bullseye" ]]; then
         debootstrap_extra_args="--exclude=usr-is-merged"
     fi
-    http_proxy=$DEBIAN_APT_GET_PROXY https_proxy=$DEBIAN_APT_GET_PROXY debootstrap --cache-dir="$DEBIAN_CACHE_PATH" --include=curl,ca-certificates,xz-utils,console-setup --extra-suites="${_arg_debian_release}"-proposed-updates "$_arg_debian_release" "$release_path" $debootstrap_extra_args
+    http_proxy=$DEBIAN_APT_GET_PROXY https_proxy=$DEBIAN_APT_GET_PROXY debootstrap --cache-dir="$DEBIAN_CACHE_PATH" --include=curl,ca-certificates,xz-utils,console-setup --extra-suites="${_arg_debian_release}"-proposed-updates $debootstrap_extra_args "$_arg_debian_release" "$release_path"
     bootstrap_release "$release_path"
     vauban_log " - Debian release prepared"
 }
