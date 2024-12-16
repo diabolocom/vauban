@@ -39,6 +39,7 @@ function to_boolean() {
 }
 
 function cleanup() {
+    local iso8601
     rm -rf tmp rootfs.img "$STACKTRACE_FILE"
 
     # Keep the conffs that were built (in case it's needed), but move them
@@ -48,7 +49,7 @@ function cleanup() {
         (
         cd overlayfs
         shopt -s nullglob
-        local iso8601="$(date --iso-8601=seconds)"
+        iso8601="$(date --iso-8601=seconds)"
         for dir in overlayfs-*; do
             mv "$dir" "$iso8601-$dir"
         done
@@ -59,7 +60,7 @@ function cleanup() {
     losetup -D > /dev/null 2> /dev/null || true
 
     # Remove our locks
-    find "$BUILD_PATH" "$KUBE_IMAGE_DOWNLOAD_PATH" -maxdepth 2 -type f -name "*.vauban.lock" -exec bash -c '[[ "'$$'" = "$(cat {})" ]] && rm {}' \; 2> /dev/null
+    find "$BUILD_PATH" "$KUBE_IMAGE_DOWNLOAD_PATH" -maxdepth 2 -type f -name "*.vauban.lock" -exec bash -c 'file="$1" ; [[ "'$$'" = "$(cat "$file")" ]] && rm "$file"' bash {} \; 2> /dev/null
 
     "${_arg_build_engine}"_cleanup_build_engine
 }
@@ -87,7 +88,7 @@ function send_sentry() {
     read -r line func file < <(caller 1)
     error_line="$(sed -n "$line"p "$file" | awk '{$1=$1};1')"
 
-    UPLOAD_CI_SSH_KEY=*** UPLOAD_CREDS=*** VAULTED_SSHD_KEYS_KEY=*** REGISTRY_PASSWORD=*** sentry-cli send-event \
+    UPLOAD_CI_SSH_KEY='***' UPLOAD_CREDS='***' VAULTED_SSHD_KEYS_KEY='***' REGISTRY_PASSWORD='***' sentry-cli send-event \
         -m "'$error_line': return code ${return_code}" \
         -t conffs:"${_arg_conffs:-}" \
         -t rootfs:"${_arg_rootfs:-}" \
@@ -109,7 +110,7 @@ STACKTRACE_FILE="$(mkdir -p /tmp/vauban > /dev/null && mktemp -p /tmp/vauban/)"
 function catch_err() {
     stacktrace_msg="$(stacktrace 2>&1)"
     send_sentry "$1" "$stacktrace_msg"
-    if [[ ! -z ${2:-} ]]; then
+    if [[ -n ${2:-} ]]; then
         tail -n 15 "$2" >> "$STACKTRACE_FILE"
     fi
     echo -e "$stacktrace_msg" >> "$STACKTRACE_FILE"
@@ -160,7 +161,7 @@ function get_rootfs_kernel_version() {
 function bootstrap_release() {
     local release_path="$1"
     if [[ -n "$DEBIAN_APT_GET_PROXY" ]]; then
-        echo 'Acquire::HTTP::Proxy "'"$DEBIAN_APT_GET_PROXY"'";' > $release_path/etc/apt/apt.conf.d/01-proxy
+        echo 'Acquire::HTTP::Proxy "'"$DEBIAN_APT_GET_PROXY"'";' > "$release_path/etc/apt/apt.conf.d/01-proxy"
     fi
     vauban_log " - Preparing the debian release with needed packages and latest kernel"
     chroot "$release_path" bin/bash <<- "EOF"
@@ -218,7 +219,8 @@ function prepare_debian_release() {
 
 
 function clone_ansible_repo() {
-    export GIT_SSH_COMMAND="ssh -i $(pwd)/$_arg_ssh_priv_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+    GIT_SSH_COMMAND="ssh -i $(pwd)/$_arg_ssh_priv_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+    export GIT_SSH_COMMAND
     if [[ ! -d ansible ]]; then
         git clone "$ANSIBLE_REPO" ansible 2> /dev/null
     fi
@@ -233,9 +235,10 @@ function get_conffs_hosts() {
     # Use this function to determine a list of hosts matching the --ansible-hosts vauban CLI argument
     # It uses ansible to resolve the ansible-specific syntax
     clone_ansible_repo
-    local current_dir="$(pwd)"
+    local current_dir
+    current_dir="$(pwd)"
     cd ansible && git reset "origin/$_arg_branch" --hard
-    cd ${ANSIBLE_ROOT_DIR:-.}
+    cd "${ANSIBLE_ROOT_DIR:-.}"
     hook_pre_ansible() { eval "$HOOK_PRE_ANSIBLE" ; } && hook_pre_ansible
     # Call ansible to resolve for us the --limit
     hosts="$(ansible -T 1 --list-hosts "$_arg_ansible_host"',!master-*' 2> /dev/null | tail -n+2 | sed -e 's/ //g' || echo)"
@@ -251,9 +254,7 @@ provided is correct, maybe there's an error in function get_conffs_hosts"
 function wait_pids() {
     local -n local_pids="$1"
     local -n local_hosts_built="$2"
-    local job_name="$3"
-    local must_exit
-    local return_code
+    local must_exit return_code
     must_exit="no"
 
     for i in "${!local_pids[@]}"; do
@@ -269,34 +270,8 @@ function wait_pids() {
 }
 
 
-function ci_commit_sshd_keys() {
-    if [[ -n ${CI:-} ]]; then
-        git config user.name "$GIT_USERNAME"
-        git config user.email "$GIT_EMAIL"
-        git remote rm origin2 || true
-        git remote add origin2 "https://${GIT_TOKEN_USERNAME}:${GIT_TOKEN_PASSWORD}@$(echo "$CI_REPOSITORY_URL" | sed -e "s,.*@\(.*\),\1,")"
-        git add vault && git commit -s -m "[CI] Update vault/" && git push origin2 HEAD:$CI_COMMIT_REF_NAME || true
-    fi
-}
 
-
-function bootstrap_upload_in_ci() {
-    if [[ -n ${CI:-} ]]; then
-        mkdir -p ~/.ssh
-        cat >> ~/.ssh/config << EOF
-Host *
-    user $UPLOAD_CI_SSH_USERNAME
-IdentityFile ~/.ssh/deploy_id_ed25519
-StrictHostKeyChecking accept-new
-EOF
-        set "+x"
-        echo "$UPLOAD_CI_SSH_KEY" | base64 -d > ~/.ssh/deploy_id_ed25519
-        set "-$VAUBAN_SET_FLAGS"
-        chmod 0600 ~/.ssh/deploy_id_ed25519
-    fi
-}
-
-docker_loggedin="$(grep \"$REGISTRY_HOSTNAME\" ~/.docker/config.json 2> /dev/null > /dev/null || echo false)"
+docker_loggedin="$(grep \""$REGISTRY_HOSTNAME"\" ~/.docker/config.json 2> /dev/null > /dev/null || echo false)"
 current_date="$(date -u +%FT%H%M)"
 function docker_login() {
     if [[ $docker_loggedin = "false" ]]; then
@@ -315,9 +290,10 @@ function retry() {
     shift
     for i in $(seq 1 "$n"); do
         if (( i >= n )); then
-            $@
+            "$@"
         else
-            $@ && break || true
+            # shellcheck disable=SC2015 # I know
+            "$@" && break || true
         fi
     done
 }
@@ -337,15 +313,16 @@ function docker_push() {
 }
 
 function ssh() {
-    env ssh -o StrictHostKeyChecking=accept-new $@
+    env ssh -o StrictHostKeyChecking=accept-new "$@"
 }
 
 function scp() {
-    env scp -o StrictHostKeyChecking=accept-new $@
+    env scp -o StrictHostKeyChecking=accept-new "$@"
 }
 
 function pull_image() {
     local image="$1"
+    # shellcheck disable=SC2015  # I know what I'm doing
     docker pull "$image" && return 0 || true
     docker pull "$REGISTRY/$image"
     docker tag "$REGISTRY/$image" "$image"

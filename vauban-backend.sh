@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2029,SC2154,SC2034
+# chellcheck disable=SC2029,SC2034
+# shellcheck disable=SC2154
 
 set -eEuo pipefail
 
@@ -12,7 +13,7 @@ function end_stage_for_host() {
 }
 
 function init_build_engine() {
-    "${_arg_build_engine}"_init_build_engine "$@"
+    "${_arg_build_engine}"_init_build_engine
 }
 
 function prepare_rootfs() {
@@ -53,11 +54,12 @@ function apply_stage() {
     local local_prefix=""
     local local_source_name=""
     local local_final_name=""
+    local current_dir
 
 
     if [[ "$stage" = *"@"* ]]; then
-        local_branch="$(echo $stage | cut -d'@' -f1)"
-        local_pb="$(echo $stage | cut -d'@' -f2)"
+        local_branch="$(echo "$stage" | cut -d'@' -f1)"
+        local_pb="$(echo "$stage" | cut -d'@' -f2)"
     else
         local_branch="$_arg_branch"
         local_pb="$stage"
@@ -65,7 +67,7 @@ function apply_stage() {
 
     (
     cd ansible
-    [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/$local_branch)" ]] || git reset "origin/$local_branch" --hard
+    [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/"$local_branch")" ]] || git reset "origin/$local_branch" --hard
     )
 
     vauban_log " - Applying stage $stage to ${source_name//\/HOSTNAME/} (playbook $local_pb from branch $local_branch) on $hosts"
@@ -93,19 +95,19 @@ function apply_stage() {
         pids_prepare_stage+=("$!")
     done
 
-    wait_pids "pids_prepare_stage" "hosts_built" "prepare stage $stage"
+    wait_pids "pids_prepare_stage" "hosts_built"
 
-    local current_dir="$(pwd)"
-    cd ansible/${ANSIBLE_ROOT_DIR:-.}
+    current_dir="$(pwd)"
+    cd "ansible/${ANSIBLE_ROOT_DIR:-.}"
     export ANSIBLE_ANY_ERRORS_FATAL=True
     export ANSIBLE_BECOME_ALLOW_SAME_USER=False
     export ANSIBLE_KEEP_REMOTE_FILES=True
     export ANSIBLE_TIMEOUT=60
     export ANSIBLE_DOCKER_TIMEOUT=60
     export ANSIBLE_INVENTORY_CACHE_TIMEOUT=10
-    if [[ $_arg_build_engine == "docker" ]]; then
+    if [[ "$_arg_build_engine" == "docker" ]]; then
         ansible_connection_module="community.docker.docker_api"
-    elif [[ $_arg_build_engine == "kubernetes" ]]; then
+    elif [[ "$_arg_build_engine" == "kubernetes" ]]; then
         ansible_connection_module="ansible.builtin.ssh"
     fi
 
@@ -113,7 +115,8 @@ function apply_stage() {
 
     vauban_log "   - Running ansible-playbook"
 
-    eval ansible-playbook --forks 200 "$local_pb" --diff -l "$(echo $hosts | sed -e 's/ /,/g')" -c "$ansible_connection_module" -v -e \''{"in_vauban": True, "in_conffs_build": '\''"$(to_boolean is_conffs)"'\''}'\' $ANSIBLE_EXTRA_ARGS 2>&1 | tee -a "$ansible_recap_file"
+    # shellcheck disable=SC2086 # Intended splitting
+    eval ansible-playbook --forks 200 "$local_pb" --diff -l "${hosts// /,}" -c "$ansible_connection_module" -v -e \''{"in_vauban": True, "in_conffs_build": '\''"$(to_boolean is_conffs)"'\''}'\' $ANSIBLE_EXTRA_ARGS 2>&1 | tee -a "$ansible_recap_file"
 
     eval "$HOOK_POST_ANSIBLE"
 
@@ -128,12 +131,13 @@ function apply_stage() {
         fi
         {
             trap 'set +x; catch_err $?' ERR
+            # shellcheck disable=SC2034 # variable is actually used elswhere
             PROCESS_NAME="end_stage"
             end_stage_for_host "$host" "$local_prefix/$local_pb" "$local_final_name"
         } &
         pids_end_stage+=("$!")
     done
-    wait_pids "pids_end_stage" "hosts_built" "end stage $stage"
+    wait_pids "pids_end_stage" "hosts_built"
     wait
 
     vauban_log "    - Stage built"
@@ -184,6 +188,7 @@ function apply_stages() {
         else
             local_final_name=""
         fi
+        # shellcheck disable=SC2086 # splitting on purpose
         apply_stage "$iter_source_name" "$prefix_name" "$stage" "$is_conffs" "$local_final_name" $hosts
         if [[ "$is_conffs" == "yes" ]]; then
             iter_source_name="${prefix_name}/HOSTNAME/${local_pb}"
@@ -203,8 +208,8 @@ function vault_put_sshd_keys() {
     vault_dir="$(mktemp -d)"
     (
     cd "$vault_dir"
-    keys_algos="$(jo -a $(jo type=ed25519 size=256) $(jo type=rsa size=4096) $(jo type=ecdsa size=384))"
-    echo $keys_algos | jq -c '.[]' | while read keys_algo; do
+    keys_algos="$(jo -a "$(jo type=ed25519 size=256)" "$(jo type=rsa size=4096)" "$(jo type=ecdsa size=384)")"
+    echo "$keys_algos" | jq -c '.[]' | while read -r keys_algo; do
         type="$(echo "$keys_algo" | jq -r .type)"
         size="$(echo "$keys_algo" | jq -r .size)"
         kv_out="$(vault kv get -format json "$VAULT_PATH"sshd/"$host"/"$type" 2>/dev/null | jq .data.data || true)"
@@ -219,7 +224,7 @@ function vault_put_sshd_keys() {
 
     done
     mkdir -p "$dest"/etc/ssh/
-    cp -r * "$dest"/etc/ssh/
+    cp -r ./* "$dest"/etc/ssh/
     chmod 0600 "$dest"/etc/ssh/ssh_host_*
     chmod 0644 "$dest"/etc/ssh/ssh_host_*.pub
     )
@@ -262,10 +267,9 @@ function local_put_sshd_keys() {
 
 function export_rootfs() {
     local image_name="$1"
-    local working_dir="$BUILD_PATH/$(image_name_to_local_path "$image_name")"
+    local working_dir
+    working_dir="$BUILD_PATH/$(image_name_to_local_path "$image_name")"
 
-    # FIXME root.img name
-    #
     mkdir -p "$working_dir"
     vauban_log "Creating rootfs from $image_name"
     vauban_log " - Preparing rootfs files locally"
@@ -284,7 +288,7 @@ function export_rootfs() {
 EOF
     put_sshd_keys "$image_name" "$working_dir"
     vauban_log " - Compressing rootfs"
-    mkdir $working_dir/proc $working_dir/dev $working_dir/sys -p
+    mkdir "$working_dir/proc" "$working_dir/dev" "$working_dir/sys" -p
     mksquashfs "$working_dir" rootfs.img -noappend -always-use-fragments -comp xz -no-exports
     tar cvf rootfs.tgz rootfs.img
     kernel_version="$(get_rootfs_kernel_version "$working_dir")"
@@ -320,7 +324,6 @@ function build_conffs() {
 
     local source_name="$1"
     local prefix_name="$2"
-    local pids=()
     local hosts_built=()
 
     apply_stages "$source_name" "$prefix_name" "$prefix_name" "yes" "${_arg_stages[@]}"
@@ -333,7 +336,6 @@ function build_conffs() {
         vauban_log "$host: success"
     done
     vauban_log "build_conffs: logs" "Conffs built"
-    ci_commit_sshd_keys  # FIXME 
 }
 
 function chroot_dracut() {
@@ -350,7 +352,7 @@ function chroot_dracut() {
     cp -r modules.d/* "$release_path/usr/lib/dracut/modules.d/"
 
     chroot "$release_path" bin/bash << EOF
-    dracut -N --conf dracut.conf -f -k "${modules_path#$release_path}" initramfs.img $kernel_version 2>&1 > /dev/null;
+    dracut -N --conf dracut.conf -f -k "${modules_path#"$release_path"}" initramfs.img $kernel_version 2>&1 > /dev/null;
 EOF
 }
 
@@ -409,17 +411,17 @@ function upload() {
             fi
             remote_file="$file-$kernel_version"
             vauban_log " - Uploading $file"
-            retry 3 curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT"/upload/vauban/linux/"$remote_file" -F "file=@$file" | jq .ok
+            retry 3 curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT/upload/vauban/linux/$remote_file" -F "file=@$file" | jq .ok
             must_symlink=1
         else
             remote_file="$(basename "$file")"
             vauban_log " - Uploading $file"
-            retry 3 curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT"/upload/vauban/$master_name/"$remote_file" -F "file=@$file" | jq .ok
+            retry 3 curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT/upload/vauban/$master_name/$remote_file" -F "file=@$file" | jq .ok
         fi
     done
     if [[ $must_symlink == 1 ]]; then
         vauban_log " - Creating symlinks $kernel_version"
-        retry 3 curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT"/upload/vauban/symlink-linux/$master_name/$kernel_version -XPOST | jq .ok
+        retry 3 curl -s -f -u "$UPLOAD_CREDS" "$UPLOAD_ENDPOINT/upload/vauban/symlink-linux/$master_name/$kernel_version" -XPOST | jq .ok
     fi
 
     vauban_log "All resources uploaded !"

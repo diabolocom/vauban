@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2164,SC2002
 
 # set -eEuo pipefail
 
 VAUBAN_KUBERNETES_UUID="$(uuidgen || echo $BASHPID)"
 SRC_PATH="$(pwd)"
+source utils.sh
 
 function kubernetes_init_build_engine() {
     export DEBIAN_APT_GET_PROXY="$DEBIAN_APT_GET_PROXY"
@@ -11,7 +13,7 @@ function kubernetes_init_build_engine() {
 }
 
 function kubernetes_cleanup_build_engine() {
-    python3 $SRC_PATH/kubernetes_controller.py --action cleanup --uuid "$VAUBAN_KUBERNETES_UUID"
+    python3 "$SRC_PATH/kubernetes_controller.py" --action cleanup --uuid "$VAUBAN_KUBERNETES_UUID"
 }
 
 function kubernetes_prepare_stage_for_host() {
@@ -22,11 +24,13 @@ function kubernetes_prepare_stage_for_host() {
     local in_conffs="$5"
     local destination="$6"
     local final_name="$7"
-    local timeout=600
+    local ansible_sha1 vauban_sha1 imginfo_update pod_ip
+    local extra_dst=""
 
 
     ansible_sha1="$( (cd ansible; git rev-parse HEAD) )"
-    vauban_sha1="$(git rev-parse HEAD 2> /dev/null || echo $VAUBAN_SHA1)"
+    # shellcheck disable=SC2153
+    vauban_sha1="$(git rev-parse HEAD 2> /dev/null || echo "$VAUBAN_SHA1")"
     imginfo_update="$(echo -e "\n\
     - date: $(date --iso-8601=seconds)\n\
       playbook: ${playbook}\n\
@@ -38,13 +42,22 @@ function kubernetes_prepare_stage_for_host() {
       vauban-sha1: ${vauban_sha1}\n" | base64 -w0)"
 
     vauban_log "      - Starting Pod for $host"
-    if [[ -z "$final_name" ]]; then
-        pod_ip="$(python3 kubernetes_controller.py --action create --name "$host" --source "$REGISTRY/$source" --destination "$REGISTRY/$destination:$current_date" --destination "$REGISTRY/$destination:latest" --conffs "$(to_boolean $in_conffs)" --imginfo "$imginfo_update" --uuid "$VAUBAN_KUBERNETES_UUID")"
-    else
-        pod_ip="$(python3 kubernetes_controller.py --action create --name "$host" --source "$REGISTRY/$source" --destination "$REGISTRY/$destination:$current_date" --destination "$REGISTRY/$destination:latest" --destination "$REGISTRY/$final_name:latest" --destination "$REGISTRY/$final_name:$current_date" --conffs "$(to_boolean $in_conffs)" --imginfo "$imginfo_update" --uuid "$VAUBAN_KUBERNETES_UUID")"
+    if [[ -n "$final_name" ]]; then
+        extra_dst="--destination $REGISTRY/$final_name:latest --destination $REGISTRY/$final_name:$current_date"
     fi
+    pod_ip="$(python3 kubernetes_controller.py \
+        --action create \
+        --name "$host" \
+        --source "$REGISTRY/$source" \
+        --destination "$REGISTRY/$destination:$current_date" \
+        --destination "$REGISTRY/$destination:latest" \
+        $extra_dst \
+        --conffs "$(to_boolean "$in_conffs")" \
+        --imginfo "$imginfo_update" \
+        --uuid "$VAUBAN_KUBERNETES_UUID" \
+        )"
     vauban_log "      - Pod for $host started successfully"
-    echo -e "\n[all]\n$host ansible_host=$pod_ip\n" >> ansible/${ANSIBLE_ROOT_DIR:-.}/inventory
+    echo -e "\n[all]\n$host ansible_host=$pod_ip\n" >> "ansible/${ANSIBLE_ROOT_DIR:-.}/inventory"
 }
 
 function kubernetes_end_stage_for_host() {
@@ -64,13 +77,15 @@ function kubernetes_check_lock_file() {
 
 function kubernetes_download_image() {
     local image_name="$1"
-    local image_local_path="$(image_name_to_local_path "$image_name")"
+    local image_local_path manifest_id_sha manifest_id digest i extracted_dest tar_output
+    image_local_path="$(image_name_to_local_path "$image_name")"
     local image_remote_path="docker://$REGISTRY/$image_name"
     (
         mkdir -p "$KUBE_IMAGE_DOWNLOAD_PATH" && cd "$KUBE_IMAGE_DOWNLOAD_PATH"
         mkdir -p oci_shared layers
         kubernetes_check_lock_file "$image_local_path.vauban.lock"
         echo $$ > "$image_local_path.vauban.lock"
+        # shellcheck disable=SC2015 # ack
         local_digest="$([[ -d "$image_local_path" ]] && cat "$image_local_path"/Digest.vauban || true)"
         remote_digest="$(skopeo inspect "$image_remote_path" | jq .Digest -r)"
         (
@@ -83,7 +98,7 @@ function kubernetes_download_image() {
         echo "$remote_digest" > "$image_local_path/Digest.vauban"
 
         i=0
-        manifest_id_sha="$(cat $image_local_path/index.json | jq '.manifests[0].digest' -r)"
+        manifest_id_sha="$(cat "$image_local_path/index.json" | jq '.manifests[0].digest' -r)"
         manifest_id="${manifest_id_sha#sha256:}"
         (
         cd "oci_shared/sha256"
@@ -102,8 +117,8 @@ function kubernetes_download_image() {
             tar_output="$(tar xf "$digest.tar" -C "$extracted_dest" 2>&1 || true)"
             while IFS= read -r line; do
                 if [[ -z "$line" ]]; then continue; fi
-                if echo "$line" | grep "Removing leading" 2>&1 >/dev/null; then continue; fi
-                if echo "$line" | grep "can't create hardlink" 2>&1 >/dev/null; then
+                if echo "$line" | grep "Removing leading" >/dev/null 2>&1; then continue; fi
+                if echo "$line" | grep "can't create hardlink" >/dev/null 2>&1; then
                     # FIXME create symlink instead
                     echo "$line"
                     end 1
@@ -153,7 +168,8 @@ function kubernetes_assemble_layers() {
 
 function kubernetes_get_manifest() {
     local src_path="${1:-.}"
-    manifest_id_sha="$(cat $src_path/index.json | jq '.manifests[0].digest' -r)"
+    local manifest_id_sha manifest_id
+    manifest_id_sha="$(cat "$src_path/index.json" | jq '.manifests[0].digest' -r)"
     manifest_id="${manifest_id_sha#sha256:}"
     cat "$KUBE_IMAGE_DOWNLOAD_PATH/oci_shared/sha256/$manifest_id"
 }
@@ -161,12 +177,13 @@ function kubernetes_get_manifest() {
 function kubernetes_prepare_rootfs() {
     local image_name="$1"
     local dst_path="$2"
-    local image_local_path="$(image_name_to_local_path "$image_name")"
+    local image_local_path layers_number
+    image_local_path="$(image_name_to_local_path "$image_name")"
 
     kubernetes_download_image "$image_name"
     (
     cd "$KUBE_IMAGE_DOWNLOAD_PATH/$image_local_path"
-    layers_number="$(echo "$(kubernetes_get_manifest)" | jq '.layers | length')"
+    layers_number="$(kubernetes_get_manifest | jq '.layers | length')"
     kubernetes_assemble_layers . "$dst_path" 0 "$((layers_number  - 1))"
     )
 }
@@ -175,19 +192,20 @@ function kubernetes_build_conffs_for_host() {
     local host="$1"
     local root_image="$2"
     local conffs_image="$3"
-    local root_image_local_path="$(image_name_to_local_path "$root_image")"
-    local conffs_image_local_path="$(image_name_to_local_path "$conffs_image")"
-    local host_local_path="$(image_name_to_local_path "$host")"
+    local root_image_local_path conffs_image_local_path host_local_path root_layers_number conffs_layers_number
+    root_image_local_path="$(image_name_to_local_path "$root_image")"
+    conffs_image_local_path="$(image_name_to_local_path "$conffs_image")"
+    host_local_path="$(image_name_to_local_path "$host")"
     local dst_path="$BUILD_PATH/$host_local_path"
 
     printf "Building conffs for host=%s\n" "$host"
 
     kubernetes_download_image "$conffs_image"
     kubernetes_download_image "$root_image"
-    root_layers_number="$(cd "$KUBE_IMAGE_DOWNLOAD_PATH/$root_image_local_path" && echo "$(kubernetes_get_manifest)" | jq '.layers | length')"
+    root_layers_number="$(cd "$KUBE_IMAGE_DOWNLOAD_PATH/$root_image_local_path" && kubernetes_get_manifest | jq '.layers | length')"
     (
     cd "$KUBE_IMAGE_DOWNLOAD_PATH/$conffs_image_local_path"
-    conffs_layers_number="$(echo "$(kubernetes_get_manifest)" | jq '.layers | length')"
+    conffs_layers_number="$(kubernetes_get_manifest | jq '.layers | length')"
     kubernetes_assemble_layers . "$dst_path" "$root_layers_number" "$((conffs_layers_number - 1))"
     )
 
@@ -212,6 +230,7 @@ function kubernetes_build_conffs_for_host() {
 }
 
 function kubernetes_create_parent_rootfs() {
+    local imginfo
     local name="$1"
     shift
     local debian_release="$1"
@@ -229,7 +248,7 @@ stages:\n" | base64 -w0)"
     if (( ${#stages} > 0 )); then
         python3 kubernetes_controller.py --action create --name "$name" --debian-release "$debian_release" --destination "$REGISTRY/debian-$debian_release/iso:$current_date" --destination "$REGISTRY/debian-$debian_release/iso:latest" --conffs "no" --imginfo "$imginfo" --uuid "$VAUBAN_KUBERNETES_UUID" > /dev/null
     else
-        python3 kubernetes_controller.py --action create --name "$name" --debian-release "$debian_release" --destination "$REGISTRY/debian-$debian_release/iso:$current_date" --destination "$REGISTRY/debian-$debian_release/iso:latest" --destination $REGISTRY/$_arg_name:$current_date --destination $REGISTRY/$_arg_name:latest --conffs "no" --imginfo "$imginfo" --uuid "$VAUBAN_KUBERNETES_UUID" > /dev/null
+        python3 kubernetes_controller.py --action create --name "$name" --debian-release "$debian_release" --destination "$REGISTRY/debian-$debian_release/iso:$current_date" --destination "$REGISTRY/debian-$debian_release/iso:latest" --destination "$REGISTRY/$_arg_name:$current_date" --destination "$REGISTRY/$_arg_name:latest" --conffs "no" --imginfo "$imginfo" --uuid "$VAUBAN_KUBERNETES_UUID" > /dev/null
     fi
     vauban_log " - Pod created. Waiting for it to finish"
     retry 2 python3 kubernetes_controller.py --name "$name" --action end
