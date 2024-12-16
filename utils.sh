@@ -77,7 +77,7 @@ function stacktrace() {
 function send_sentry() {
      # Don't do anything if sentry-cli command doesn't exist
     if ! command -v sentry-cli > /dev/null; then
-        return
+        return 0
     fi
 
     local return_code="${1:-}"

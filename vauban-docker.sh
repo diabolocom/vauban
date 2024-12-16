@@ -53,7 +53,7 @@ function docker_prepare_stage_for_host() {
     fi
 
     ansible_sha1="$( (cd ansible; git rev-parse HEAD) )"
-    vauban_sha1="$(git rev-parse HEAD)"
+    vauban_sha1="$(git rev-parse HEAD || echo $VAUBAN_SHA1)"
     imginfo_update="$(echo -e "\n\
     - date: $(date --iso-8601=seconds)\n\
       playbook: ${playbook}\n\

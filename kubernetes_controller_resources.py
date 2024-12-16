@@ -103,11 +103,11 @@ cm_dockerfile = {
 }
 
 
-def get_pod_kaniko_manifest(name, source, debian_release, tags, in_conffs):
+def get_pod_kaniko_manifest(name, source, debian_release, tags, in_conffs, uuid):
     pod_kaniko = {
         "apiVersion": "v1",
         "kind": "Pod",
-        "metadata": {"name": name},
+        "metadata": {"name": name, "labels": {"vauban.corp.dblc.io/uuid": str(uuid)}},
         "spec": {
             "containers": [
                 {

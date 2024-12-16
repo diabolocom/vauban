@@ -29,5 +29,11 @@ RUN apk del busybox && \
     apk add --no-cache py3-pip py3-click py3-jmespath tar skopeo htop jo debootstrap rsync && \
     pip install --break-system-packages -r requirements.txt
 
+ARG VAUBAN_SHA1
+
+RUN [[ ${VAUBAN_SHA1:-null} != null ]]
+
+ENV VAUBAN_SHA1=$VAUBAN_SHA1
+
 COPY *.sh *.py *.conf config.yml ./
 COPY modules.d ./modules.d
