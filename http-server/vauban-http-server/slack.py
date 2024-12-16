@@ -306,7 +306,11 @@ class SlackNotif:
         return message_ts
 
     def update_in_progress(self, ulid, infos, context, logs):
-        if datetime.now() > self.ratelimit_timeout and self.ratelimit_freq > 1:
+        if (
+            self.ratelimit_timeout is not None
+            and datetime.now() > self.ratelimit_timeout
+            and self.ratelimit_freq > 1
+        ):
             self.ratelimit_freq -= 1
             self.ratelimit_timeout = datetime.now() + timedelta(seconds=60)
         if random.randint(1, self.ratelimit_freq) == 1:
