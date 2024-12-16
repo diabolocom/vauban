@@ -179,7 +179,7 @@ def get_last_five_log_lines(log_objs):
     if log_objs["logs"]["status"] == "error":
         return []
     if log_objs["logs"]["status"] == "ok":
-        return log_objs["logs"]["logs"].split("\n")[-5:]
+        return log_objs["logs"]["logs"].strip().split("\n")[-5:]
     raise Exception("Code shouldn't be reached")
 
 
@@ -241,12 +241,17 @@ def status(ulid):
 @app.route("/delete/<ulid>", methods=["DELETE", "POST"])
 def delete(ulid):
     try:
-        api_response = batch_api_instance.delete_namespaced_job(
-            f"vauban-{ulid.lower()}", namespace, propagation_policy="Background"
+        pods_response = core_api_instance.list_namespaced_pod(
+            namespace,
+            label_selector=f"vauban.corp.dblc.io/vauban-job-id={ulid.upper()}",
         )
-        slack_notif.update_garbage_collected(
-            ulid, {}, {}, get_last_five_log_lines(log_objs)
-        )
+        pods = {}
+        if pods_response is not None:
+            for pod in pods_response.items:
+                api_response = batch_api_instance.delete_namespaced_job(
+                    pod.metadata.name, namespace, propagation_policy="Background"
+                )
+        slack_notif.update_garbage_collected(ulid, {}, {}, None)
     except ApiException as e:
         if str(e.status) == "404":
             return jsonify({"status": "ok", "message": "Already deleted !"}), 200
