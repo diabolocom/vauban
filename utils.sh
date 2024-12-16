@@ -58,7 +58,7 @@ function catch_err() {
         -t source_image:"${_arg_source_image:-}" \
         -a "$(stacktrace)" \
         -t user_sudo:"${SUDO_USER:-${USER:-undefined}}" \
-        --logfile "$recap_file" || true
+        --logfile "$recap_file" || echo Could not send sentry event 1>&2
     kill -10 $$
     exit 0
 }
@@ -367,12 +367,12 @@ else
 fi
 vauban_start_time="$(date --iso-8601=seconds)"
 recap_file="$vauban_log_path/vauban-recap-$vauban_start_time"
-: >> $recap_file
 
 function init_log() {
     mkdir -p "$vauban_log_path"
     mkdir -p "$vauban_log_path/vauban-docker-build-${vauban_start_time}"
     mkdir -p "$vauban_log_path/vauban-prepare-stage-${vauban_start_time}"
+    : >> $recap_file
 }
 init_log
 
