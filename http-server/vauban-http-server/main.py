@@ -246,6 +246,22 @@ def status(ulid):
         return jsonify(
             {"status": "ok", "message": "Job is done ! Build successful"} | log_objs
         )
+    if (
+        status.active is None
+        and status.completion_time is None
+        and status.terminating is None
+        and status.failed is None
+    ):
+        slack_notif.update_creation(ulid, {}, {})
+        return (
+            jsonify(
+                {
+                    "status": "in-progress",
+                    "message": "Job is waiting on Kubernetes resources to be created",
+                }
+            ),
+            202,
+        )
 
     capture_exception(Exception(status))
     slack_notif.update_broken(ulid, {}, {}, get_last_n_log_lines(log_objs))

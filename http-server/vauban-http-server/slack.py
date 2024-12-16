@@ -245,9 +245,10 @@ class SlackNotif:
         except SlackRatelimitedException as e:
             self.ratelimit_freq += int(retry == 3)
             self.ratelimit_timeout = datetime.now() + timedelta(seconds=60)
-            if (
-                event_type == "update-in-progress"
-            ):  # We can afford to not update this kind of event, it's not important enough to spam Slack's API
+            if event_type in [
+                "update-in-progress",
+                "creation",
+            ]:  # We can afford to not update this kind of event, it's not important enough to spam Slack's API
                 return None
             time.sleep(0.5)
             if retry >= 0:
@@ -357,3 +358,6 @@ class SlackNotif:
         return self._update_notification(
             "update-garbage-collected", ulid, infos, context, logs
         )
+
+    def update_creation(self, ulid, infos, context):
+        return self._update_notification("creation", ulid, infos, context, None)
