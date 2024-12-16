@@ -87,8 +87,8 @@ def update_imginfo(name, namespace, imginfo):
         f'echo -e {imginfo} | base64 -d >> /imginfo;']
     exec_in_pod(name, namespace, exec_command)
 
-def create_pod(name, source, debian_release, destination, in_conffs, imginfo):
-    kaniko_pod = get_pod_kaniko_manifest(name, source, debian_release, destination, in_conffs)
+def create_pod(name, source, debian_release, destination, in_conffs, imginfo, uuid):
+    kaniko_pod = get_pod_kaniko_manifest(name, source, debian_release, destination, in_conffs, uuid)
     conflict, list_conflicts = check_if_pods_already_exists(NS, [name])
     if conflict:
         raise RuntimeError(f"Conflict from {list_conflicts}")

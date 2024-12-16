@@ -32,7 +32,8 @@ function update_linux() {
 
 function run_sshd() {
     mkdir -p /root/.ssh
-    echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILr4hFLwCjbQmC45rZm+1GO/HMmnc2nrlzCaBjNN/hZX root@vauban" >> /root/.ssh/authorized_keys
+""" + f"""echo "{os.environ.get('VAUBAN_KUBERNETES_ENGINE_PUB_KEY')}" >> /root/.ssh/authorized_keys""" + """
+
     ssh-keygen -A
     echo -e "PermitRootLogin yes\\nPasswordAuthentication no\\nPubkeyAuthentication yes\\nSubsystem sftp /usr/lib/openssh/sftp-server" > /tmp/vauban_sshd
     mkdir -p /run/sshd
