@@ -55,7 +55,6 @@ function kubernetes_prepare_stage_for_host() {
         --destination "$REGISTRY/$destination:latest" \
         $extra_dst \
         --conffs "$(to_boolean "$in_conffs")" \
-        --imginfo "$imginfo_update" \
         --uuid "$VAUBAN_KUBERNETES_UUID" \
         )"
     vauban_log "      - Pod for $host started successfully"
@@ -66,7 +65,7 @@ function kubernetes_end_stage_for_host() {
     local host="$1"
 
     vauban_log "      - Waiting for Pod $host to finish"
-    python3 kubernetes_controller.py --name "$host" --action end
+    python3 kubernetes_controller.py --name "$host" --action end --imginfo "$imginfo_update"
     vauban_log "      - Pod $host finished successfully"
 }
 
