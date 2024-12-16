@@ -10,6 +10,9 @@ way where, by default, everything is in live-mode. This means that a reboot
 will erase all unwanted changes, helping you separate stateful data from
 configuration and applications.
 
+Starting from version 2.0, Vauban runs exclusively in Kubernetes, exposing an API to start build jobs.
+It also comes with a scheduler, to auto-build images with a cronjob-style syntax.
+
 # Why is Vauban needed ? 🚚
 
 Vauban and the PXE/local live-image booting system is useful for many reasons:
@@ -52,66 +55,31 @@ In order to work, you need to setup:
 - A docker registry for vauban to store its images. The images might contain
   secrets or configuration that must be kept private, so keep this in mind when
   choosing a registry.
-- A distant server to upload created images.
+- A distant server to upload created images. Vauban expects an HTTP API to upload some images and make a symlink between
+  some resources. More information in vauban-backend.sh's upload function
 - An ansible repository
+- A working kubernetes cluster. Vauban provides an example Helm Chart to deploy it
+
+- Optionally: vauban-client to interact easily with Vauban's http-server
+- Optionally: A hashicorp vault to store server's SSH keys
+- Optionally: A sentry instance to collect errors
+- Optionally: A Slack channel and application to provide build information directly in Slack
 
 ## Setup
 
-### Setup vauban.py
+## Install vauban in Kubernetes
 
-The recommended entrypoint to use with vauban is `vauban.py`. It has a few
-python dependencies, and it's recommended to install vauban via `pip install --editable .`.
+Follow the Helm chart instructions to install the server-side Vauban HTTP-api, and configure it.
 
-This should install the dependencies, and provide you with `vauban` in your path.
+### Install vauban-client
 
-Autocomplete is also available, add this on your .rc file:
+The recommended entrypoint to use with vauban is `vauban-client`. It has a few
+dependencies, and they will be listed when running it if they are not installed.
 
-```bash
-# bash
-eval "$(_VAUBAN_COMPLETE=bash_source vauban)"
-# zsh
-eval "$(_VAUBAN_COMPLETE=zsh_source vauban)"
-```
+### Configure jobs in config.yml
 
-### Manual prerequisites
-
-You need a live ISO to be around the local directory. You can download it from
-[cdimage.debian.org](https://cloud.debian.org/images/cloud/bullseye/latest/) for example.
-Be sure to pick amd64 and the standard (or minimal) ISO, without any graphical
-packages installed.
-
-You'll also need the ansible-clone private key, which allow you to clone our
-ansible repository to apply it on images. It can be found in protected variables
-of this project. It is recommended to make it available as a `ansible-ro` file
-at the root of the project.
-
-You'll also need ssh servers keys, to keep only one identity on all VM. Put them
-in `ssh_keys/`. You can find them on any server, in `/etc/ssh/ssh_host_*`
-
-Most configuration is happening in `.secrets.env` or its public counterpart,
-`vauban-configuration.sh`. Be sure to have it setup properly, by setting it
-up from scratch or by copying the values from somewhere else (like the CI/CD
-variables).
-
-### Setup CI/CD
-
-You also need to setup the `conffs` key in `config.yml` to a proper ansible-valid
-expression to select hosts. `node01-*,!node*-dqa*` for example for all the v2 nodes
-but the dqa ones.
-
-Don't forget to also add a dummy master in ansible's inventory with the same name
-than your master you're going to build, for example `master-11-netdata`.
-
-Once pushed, you can go to the pipelines tab to create your master.
-
-| variable | description |
-| ------ | ------ |
-| name | Name of the master, for example  `master-10-netdata` |
-| branch | Ansible git branch to build, for example `master` (by default) |
-| rootfs | `yes`/`no`, Build the rootfs |
-| conffs | `yes`/`no`, Build the conffs |
-| initramfs | `yes`/`no`, Build the initramfs |
-| build_parents | Number of parents to build **before** the master we want to build (optional) |
+`config.yml` is the main file for Vauban build definition. Please modify it and provide it to your instance of vauban
+running in Kubernetes.
 
 ## Day-to-day usage
 
@@ -148,9 +116,9 @@ and optionnally provide an ansible branch to use (`branch`)
 `config.yml` file is not read by `vauban.sh`, but by the higher level interface
 `vauban.py`. It is recommended anyway to not use `vauban.sh` directly
 
-### vauban.py
+### vauban-client
 
-To start building things, first checkout `vauban.py --help`.
+To start building things, first checkout `vauban-client --help`.
 
 The main argument is `--name`, to choose one of the masters to build from the
 config file.
@@ -313,29 +281,27 @@ Please note a few things about ansible:
   `when: not in_vauban` for example.
   However, systemd enable=true works and shall be used to enable a systemd service
 
-- `ansible_fqdn` will use docker build's container name, which can't be changed.
-   Use `inventory_hostname` instead
-
 - The kernel running is not the one that will be used in the end (it's your build
-machine's one). Any operations that needs to interact directly with the kernel
-won't work (sysctl, some build). You will have to find ways to overcome this.
+  machine's one). Any operations that needs to interact directly with the kernel
+  won't work (sysctl, some build). You will have to find ways to overcome this.
 
 ## docker interactions
 
-- As the docker engine is used to build the image, `/etc/hosts`, `/etc/hostname` and
+- As a container engine is used to build the image, `/etc/hosts`, `/etc/hostname` and
   `/etc/resolv.conf` are automatically mounted in the container, and it cannot be
   prevented. To overcome this, vauban automatically transfer the content of `/toslash`
   in `/`. One can therefore write into /toslash/etc/hostname for example for it to
   be taken into account once exported.
 
-## dhcp manager
+## DHCP options
 
 boot options for PXE booting could be looking like this:
 ```
-console=tty0 console=ttyS0,115200 net.ifnames=0 verbose rd.debug rd.shell rd.writable.fsimg=1 rd.luks=0 rd.lvm=0 rd.md=0 rd.dm=0 rd.neednet=1 rd.live.debug=1 rd.live.image rootflags=rw rootovl systemd.debug_shell ip=eth0:dhcp:01:23:45:67:89:ab pxemac=01:23:45:67:89:ab boot=tmpfs live.updates=http://path/to/conffs root=live:http://path/to/rootfs
+console=tty0 console=ttyS0,115200 net.ifnames=0 verbose rd.writable.fsimg=1 rd.luks=0 rd.lvm=0 rd.md=0 rd.dm=0 rd.neednet=1 rd.live.debug=1 rd.live.image rootflags=rw rootovl ip=eth0:dhcp:01:23:45:67:89:ab pxemac=01:23:45:67:89:ab boot=tmpfs live.updates=http://path/to/conffs root=live:http://path/to/rootfs
 ```
 
-## Misc
+To help debugging the boot process, one can use:
 
-It might be useful to disable overlayfs metacopy for the conffs:
-`echo N | sudo tee /sys/module/overlay/parameters/metacopy`
+```
+rd.shell systemd.log_target=ksm systemd.log_level=debug debug systemd.show_status=true systemd.crash_shell=true systemd.debug_shell
+```
