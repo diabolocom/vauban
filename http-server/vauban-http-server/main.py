@@ -39,6 +39,32 @@ batch_api_instance = client.BatchV1Api(k8s_client)
 namespace = os.environ.get("VAUBAN_NAMESPACE", "vauban")
 
 
+@app.route("/")
+def help():
+    return """
+    Available routes:
+        /build
+            method: POST
+            description: Starts a build job
+            arguments:
+                name (mandatory): name of the master to build
+                stage (mandatory): stage to run (rootfs, conffs, initramfs)
+                build-parents: Number of parent stages to run
+                branch: Override config.yml's branch argument
+                conffs: Override config.yml's conffs argument
+                extra-args: Extra arguments to give to vauban.py, as a str
+                vauban-image: Docker image to use for Vauban. Impacts config.yml
+            returns: Object containing `status` and possibly a `job_ulid` if job got accepted
+        /status/<ulid>
+            method: GET
+            description: returns information about the build job specified by the ULID
+            returns: Object containing at least `status`, `message` and `logs`
+        /delete/<ulid>
+            method: DELETE POST
+            description: delete a build job and its resources allocated. Will interrupt vauban if it's running
+    """
+
+
 @app.route("/build", methods=["POST"])
 def build():
     try:
