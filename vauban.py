@@ -557,10 +557,7 @@ def vauban(**kwargs):
     try:
         master.build(cc)
     except NothingToDoException as e:
-        if os.environ.get("CI", None) is None:
-            traceback.print_exception(e)
-            print(output.logs)
-            sys.exit(1)
+        pass
     except subprocess.CalledProcessError as e:
         print("Building failed !")
         print(output.get_output())
