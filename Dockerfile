@@ -18,9 +18,9 @@ RUN apk --update add --virtual verify gpgme \
  && unzip vault_${VERSION}_linux_amd64.zip \
  && mv vault /usr/local/bin/ \
  && apk del busybox \
- && apk add --no-cache py3-yaml bash squashfs-tools git openssh-client coreutils binutils findutils jq \
+ && apk add --no-cache bash squashfs-tools git openssh-client coreutils binutils findutils jq \
     grep file make gpg gpg-agent util-linux xxhash curl vim \
-    py3-click py3-jmespath tar skopeo htop jo debootstrap rsync \
+    tar skopeo htop jo debootstrap rsync \
  && pip install --break-system-packages -r requirements.txt \
  && pip install --break-system-packages ansible \
  && curl -sL https://sentry.io/get-cli/ | bash \
